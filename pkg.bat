@@ -7,7 +7,7 @@ mkdir build
 mkdir build\%srv_name%
 set GOOS=windows
 set GOARCH=%1
-go build -o build\%srv_name%\coversocks.exe github.com/coversocks/golang/coversocks
+go build -o build\%srv_name%\csocks.exe github.com/coversocks/golang/csocks
 if NOT %ERRORLEVEL% EQU 0 goto :efail
 xcopy win-%OS%\nssm.exe build\%srv_name%
 xcopy cert.bat build\%srv_name%
@@ -16,7 +16,7 @@ xcopy coversocks-install.bat build\%srv_name%
 xcopy coversocks-uninstall.bat build\%srv_name%
 xcopy default-client.json /F build\%srv_name%
 xcopy default-server.json /F build\%srv_name%
-xcopy dsuser.json /F build\%srv_name%
+xcopy csuser.json /F build\%srv_name%
 xcopy sysproxy.exe /F build\%srv_name%
 xcopy sysproxy64.exe /F build\%srv_name%
 xcopy gfwlist.txt /F build\%srv_name%
