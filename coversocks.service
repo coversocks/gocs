@@ -1,0 +1,13 @@
+[Unit]
+Description=coversocks service
+After=network.target
+
+[Service]
+User=cs
+Restart=always
+WorkingDirectory=/home/cs/
+ExecStart=/home/cs/coversocks/csocks -s -f /home/cs/conf/coversocks.json
+# EnvironmentFile=/etc/coversocks/coversocks.env
+
+[Install]
+WantedBy=multi-user.target

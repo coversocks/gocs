@@ -1,0 +1,25 @@
+{
+    "http_listen_addr": ":5100-5110",
+    "https_listen_addr": ":5200-5210",
+    "https_cert": "cscert.crt",
+    "https_key": "cscert.key",
+    "manager": {
+        "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
+    },
+    "user_file": "dsuser.json",
+    "servers": [
+        {
+            "enable": true,
+            "name": "test1",
+            "address": [
+                "wss://127.0.0.1:5200/ds?skip_verify=1"
+            ],
+            "username": "test",
+            "password": "123"
+        }
+    ],
+    "socks_addr": "0.0.0.0:1105",
+    "http_addr": "0.0.0.0:1103",
+    "manager_addr": "0.0.0.0:1101",
+    "mode": "auto"
+}

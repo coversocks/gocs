@@ -1,0 +1,19 @@
+{
+    "servers": [
+        {
+            "enable": true,
+            "name": "test1",
+            "address": [
+                "wss://127.0.0.1:5200/ds?skip_verify=1"
+            ],
+            "username": "test",
+            "password": "123"
+        }
+    ],
+    "socks_addr": "0.0.0.0:11105",
+    "http_addr": "0.0.0.0:11103",
+    "manager_addr": "0.0.0.0:11101",
+    "mode": "manual",
+    "log": 0,
+    "work_dir": ""
+}

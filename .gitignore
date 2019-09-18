@@ -1,0 +1,10 @@
+
+*.out
+coverage.html
+coverage.json
+cscert.crt
+cscert.key
+coversocks.exe
+build
+privoxy
+work

@@ -1,0 +1,10 @@
+{
+    "http_listen_addr": "",
+    "https_listen_addr": ":5200",
+    "https_cert": "cscert.crt",
+    "https_key": "cscert.key",
+    "manager": {
+        "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
+    },
+    "user_file": "csuser.json"
+}
