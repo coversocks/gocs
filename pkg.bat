@@ -12,7 +12,8 @@ if NOT %ERRORLEVEL% EQU 0 goto :efail
 xcopy win-%OS%\nssm.exe build\%srv_name%
 xcopy cert.bat build\%srv_name%
 xcopy coversocks-conf.bat build\%srv_name%
-xcopy coversocks-install.bat build\%srv_name%
+xcopy coversocks-install-server.bat build\%srv_name%
+xcopy coversocks-install-client.bat build\%srv_name%
 xcopy coversocks-uninstall.bat build\%srv_name%
 xcopy default-client.json /F build\%srv_name%
 xcopy default-server.json /F build\%srv_name%
