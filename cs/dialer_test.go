@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -92,5 +93,121 @@ func TestNetDialer(t *testing.T) {
 	if err == nil {
 		t.Error("error")
 		return
+	}
+}
+
+type TagRWC struct {
+	Tag string
+}
+
+func (t *TagRWC) Read(p []byte) (l int, err error) {
+	panic("not")
+}
+func (t *TagRWC) Write(p []byte) (l int, err error) {
+	panic("not")
+}
+func (t *TagRWC) Close() (err error) {
+	panic("not")
+}
+
+func TestSortedDialer(t *testing.T) {
+	willErr := 0
+	dialer := NewSortedDialer(
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			if willErr == 1 || willErr == 3 {
+				err = fmt.Errorf("error")
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+			raw = &TagRWC{Tag: "1"}
+			return
+		}),
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			if willErr == 2 || willErr == 3 {
+				err = fmt.Errorf("error")
+				return
+			}
+			time.Sleep(1 * time.Millisecond)
+			raw = &TagRWC{Tag: "2"}
+			return
+		}),
+	)
+	dialer.RateTolerance = 0.05
+	dialer.SortDelay = 1
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "1" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "2" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "2" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	//
+	willErr = 2
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "1" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	willErr = 0
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "1" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "1" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	//
+	willErr = 1
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "2" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	willErr = 0
+	//
+	fmt.Println(dialer.dialers, dialer.avgTime, dialer.errRate)
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "2" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
 	}
 }

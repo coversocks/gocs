@@ -39,6 +39,34 @@ type ClientServerConf struct {
 	LastUsed int      `json:"-"`
 }
 
+//Dial imp cs.Dialer
+func (c *ClientServerConf) Dial(remote string) (raw io.ReadWriteCloser, err error) {
+	address := c.Address[c.LastUsed]
+	if len(c.Username) > 0 && len(c.Password) > 0 {
+		if strings.Contains(address, "?") {
+			address += fmt.Sprintf("&username=%v&password=%v", c.Username, c.Password)
+		} else {
+			address += fmt.Sprintf("?username=%v&password=%v", c.Username, c.Password)
+		}
+	}
+	cs.InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
+	raw, err = cs.WebsocketDialer("").Dial(address)
+	if err == nil {
+		cs.InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
+		conn := cs.NewStringConn(raw)
+		conn.Name = c.Name
+		raw = conn
+	} else {
+		cs.WarnLog("Client connect one channel to %v-%v fail with %v", c.Name, c.LastUsed, err)
+	}
+	c.LastUsed = (c.LastUsed + 1) % len(c.Address)
+	return
+}
+
+func (c *ClientServerConf) String() string {
+	return c.Name
+}
+
 //ClientConf is pojo for dark socks client configure
 type ClientConf struct {
 	Servers     []*ClientServerConf `json:"servers"`
@@ -48,37 +76,18 @@ type ClientConf struct {
 	Mode        string              `json:"mode"`
 	LogLevel    int                 `json:"log"`
 	WorkDir     string              `json:"work_dir"`
+	Dialer      cs.Dialer           `json:"-"`
 }
 
-//Dial connection by remote
-func (c *ClientConf) Dial(remote string) (raw io.ReadWriteCloser, err error) {
+//Boostrap will initial setting
+func (c *ClientConf) Boostrap() (err error) {
+	var dialers = []cs.Dialer{}
 	for _, conf := range c.Servers {
 		if conf.Enable && len(conf.Address) > 0 {
-			address := conf.Address[conf.LastUsed]
-			conf.LastUsed = (conf.LastUsed + 1) % len(conf.Address)
-			if len(conf.Username) > 0 && len(conf.Password) > 0 {
-				if strings.Contains(address, "?") {
-					address += fmt.Sprintf("&username=%v&password=%v", conf.Username, conf.Password)
-				} else {
-					address += fmt.Sprintf("?username=%v&password=%v", conf.Username, conf.Password)
-				}
-			}
-			cs.InfoLog("Client start connect one channel to %v", conf.Name)
-			raw, err = cs.WebsocketDialer("").Dial(address)
-			if err == nil {
-				cs.InfoLog("Client connect one channel to %v success", conf.Name)
-				conn := cs.NewStringConn(raw)
-				conn.Name = conf.Name
-				raw = conn
-				break
-			} else {
-				cs.WarnLog("Client connect one channel fail with %v", err)
-			}
+			dialers = append(dialers, conf)
 		}
 	}
-	if raw == nil {
-		err = fmt.Errorf("server not found")
-	}
+	c.Dialer = cs.NewSortedDialer(dialers...)
 	return
 }
 
@@ -153,6 +162,17 @@ func (c *ClientConf) UpdateGfwlist(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%v", "ok")
 }
 
+//State is http handler to show client state
+func (c *ClientConf) State(w http.ResponseWriter, r *http.Request) {
+	res := map[string]interface{}{}
+	if d, ok := c.Dialer.(cs.Statable); ok {
+		res["dialers"] = d.State()
+	}
+	w.Header().Set("Content-Type", "application/json;charset=utf-8")
+	encoder := json.NewEncoder(w)
+	encoder.Encode(res)
+}
+
 func startClient(c string) (err error) {
 	conf := &ClientConf{Mode: "auto"}
 	err = cs.ReadJSON(c, &conf)
@@ -174,7 +194,8 @@ func startClient(c string) (err error) {
 	}
 	cs.SetLogLevel(conf.LogLevel)
 	cs.InfoLog("Client using config from %v", c)
-	client = cs.NewClient(cs.DefaultBufferSize, conf)
+	conf.Boostrap()
+	client = cs.NewClient(cs.DefaultBufferSize, conf.Dialer)
 	proxyServer = cs.NewSocksProxy()
 	proxyServer.Dialer = func(target string, raw io.ReadWriteCloser) (sid uint64, err error) {
 		err = client.ProcConn(raw, target)
@@ -185,6 +206,7 @@ func startClient(c string) (err error) {
 		mux.HandleFunc("/pac.js", conf.PAC)
 		mux.HandleFunc("/changeProxyMode", conf.ChangeProxyMode)
 		mux.HandleFunc("/updateGfwlist", conf.UpdateGfwlist)
+		mux.HandleFunc("/state", conf.State)
 		var listener net.Listener
 		managerServer = &http.Server{Addr: conf.ManagerAddr, Handler: mux}
 		listener, err = net.Listen("tcp", conf.ManagerAddr)

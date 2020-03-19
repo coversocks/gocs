@@ -11,7 +11,7 @@ output=build
 
 #### Package ####
 srv_name=coversocks
-srv_ver=0.1.0
+srv_ver=0.2.0
 srv_out=$output/$srv_name
 rm -rf $srv_out
 mkdir -p $srv_out

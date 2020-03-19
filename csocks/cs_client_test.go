@@ -67,15 +67,16 @@ func TestClientConf(t *testing.T) {
 			},
 		},
 	}
+	conf.Boostrap()
 	//not server
-	_, err := conf.Dial("")
+	_, err := conf.Dialer.Dial("")
 	if err == nil {
 		t.Error(err)
 		return
 	}
 	//err server
 	conf.Servers[0].Enable = true
-	_, err = conf.Dial("")
+	_, err = conf.Dialer.Dial("")
 	if err == nil {
 		t.Error(err)
 		return
@@ -83,7 +84,8 @@ func TestClientConf(t *testing.T) {
 	conf.Servers[0].Enable = false
 	//having argument
 	conf.Servers[1].Enable = true
-	raw, err := conf.Dial("")
+	conf.Boostrap()
+	raw, err := conf.Dialer.Dial("")
 	if err != nil {
 		t.Error(err)
 		return
@@ -95,7 +97,8 @@ func TestClientConf(t *testing.T) {
 	conf.Servers[1].Enable = false
 	//not argument
 	conf.Servers[2].Enable = true
-	raw, err = conf.Dial("")
+	conf.Boostrap()
+	raw, err = conf.Dialer.Dial("")
 	if err != nil {
 		t.Error(err)
 		return

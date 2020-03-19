@@ -223,3 +223,13 @@ func (ln TCPKeepAliveListener) Accept() (net.Conn, error) {
 	}
 	return tc, err
 }
+
+//Now get current timestamp
+func Now() int64 {
+	return time.Now().Local().UnixNano() / 1e6
+}
+
+//Statable is interface for load object state
+type Statable interface {
+	State() interface{}
+}

@@ -1,6 +1,6 @@
 @echo off
 set srv_name=coversocks
-set srv_ver=0.1.0
+set srv_ver=0.2.0
 set OS=%1
 del /s /a /q build\%srv_name%
 mkdir build
