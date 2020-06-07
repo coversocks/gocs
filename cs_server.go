@@ -1,16 +1,14 @@
-package main
+package gocs
 
 import (
 	"fmt"
 	"net/http"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/coversocks/golang/cs"
+	"github.com/coversocks/gocs/core"
 	"golang.org/x/net/websocket"
 )
 
@@ -23,6 +21,7 @@ type ServerConf struct {
 	Manager         map[string]string `json:"manager"`
 	UserFile        string            `json:"user_file"`
 	LogLevel        int               `json:"log"`
+	DNSServer       string            `json:"dns_server"`
 }
 
 var serverConf string
@@ -30,30 +29,31 @@ var serverConfDir string
 var httpServer = map[string]*http.Server{}
 var httpServerLck = sync.RWMutex{}
 
-func startServer(c string) (err error) {
+//StartServer by configure path
+func StartServer(c string) (err error) {
 	conf := &ServerConf{}
-	err = cs.ReadJSON(c, &conf)
+	err = core.ReadJSON(c, &conf)
 	if err != nil {
-		cs.ErrorLog("Server read configure from %v fail with %v", c, err)
-		exitf(1)
+		core.ErrorLog("Server read configure from %v fail with %v", c, err)
 		return
 	}
 	serverConf = c
 	serverConfDir = filepath.Dir(serverConf)
-	cs.SetLogLevel(conf.LogLevel)
+	core.SetLogLevel(conf.LogLevel)
 	userFile := conf.UserFile
 	if len(userFile) > 0 && !filepath.IsAbs(userFile) {
 		userFile, _ = filepath.Abs(filepath.Join(serverConfDir, userFile))
 	}
-	auth := cs.NewJSONFileAuth(conf.Manager, userFile)
-	server := cs.NewServer(cs.DefaultBufferSize, cs.NetDialer("tcp"))
+	auth := core.NewJSONFileAuth(conf.Manager, userFile)
+	dialer := core.NewNetDialer(conf.DNSServer)
+	server := core.NewServer(core.DefaultBufferSize, dialer)
 	mux := http.NewServeMux()
 	mux.Handle("/ds", websocket.Handler(func(ws *websocket.Conn) {
 		ok, err := auth.BasicAuth(ws.Request())
 		if ok && err == nil {
-			server.ProcConn(cs.NewBaseConn(ws, server.BufferSize))
+			server.ProcConn(core.NewBaseConn(ws, server.BufferSize))
 		} else {
-			cs.WarnLog("Server receive auth fail connection from %v", ws.RemoteAddr())
+			core.WarnLog("Server receive auth fail connection from %v", ws.RemoteAddr())
 		}
 		ws.Close()
 	}))
@@ -62,12 +62,11 @@ func startServer(c string) (err error) {
 	mux.HandleFunc("/manager/removeUser", auth.RemoveUser)
 	wait := sync.WaitGroup{}
 	if len(conf.HTTPListenAddr) > 0 {
-		cs.InfoLog("Server start http server on %v", conf.HTTPListenAddr)
+		core.InfoLog("Server start http server on %v", conf.HTTPListenAddr)
 		var addrs []string
 		addrs, err = parseListenAddr(conf.HTTPListenAddr)
 		if err != nil {
-			cs.ErrorLog("Server start http server on %v fail with %v", conf.HTTPListenAddr, err)
-			exitf(1)
+			core.ErrorLog("Server start http server on %v fail with %v", conf.HTTPListenAddr, err)
 			return
 		}
 		wait.Add(len(addrs))
@@ -79,7 +78,7 @@ func startServer(c string) (err error) {
 				httpServerLck.Unlock()
 				rerr := s.ListenAndServe()
 				if rerr != nil {
-					cs.ErrorLog("Server http server on %v is stopped fail with %v", addr, rerr)
+					core.ErrorLog("Server http server on %v is stopped fail with %v", addr, rerr)
 				}
 				httpServerLck.Lock()
 				delete(httpServer, fmt.Sprintf("%p", s))
@@ -89,12 +88,11 @@ func startServer(c string) (err error) {
 		}
 	}
 	if len(conf.HTTPSListenAddr) > 0 {
-		cs.InfoLog("Server start https server on %v", conf.HTTPSListenAddr)
+		core.InfoLog("Server start https server on %v", conf.HTTPSListenAddr)
 		var addrs []string
 		addrs, err = parseListenAddr(conf.HTTPSListenAddr)
 		if err != nil {
-			cs.ErrorLog("Server start https server on %v fail with %v", conf.HTTPSListenAddr, err)
-			exitf(1)
+			core.ErrorLog("Server start https server on %v fail with %v", conf.HTTPSListenAddr, err)
 			return
 		}
 		certFile, certKey := conf.HTTPSCert, conf.HTTPSKey
@@ -113,7 +111,7 @@ func startServer(c string) (err error) {
 				httpServerLck.Unlock()
 				rerr := s.ListenAndServeTLS(certFile, certKey)
 				if rerr != nil {
-					cs.ErrorLog("Server https server on %v is stopped fail with %v", addr, rerr)
+					core.ErrorLog("Server https server on %v is stopped fail with %v", addr, rerr)
 				}
 				httpServerLck.Lock()
 				delete(httpServer, fmt.Sprintf("%p", s))
@@ -122,14 +120,14 @@ func startServer(c string) (err error) {
 			}(a)
 		}
 	}
-	go handlerServerKill()
 	wait.Wait()
-	cs.InfoLog("Server all listener is stopped")
+	core.InfoLog("Server all listener is stopped")
 	return
 }
 
-func stopServer() {
-	cs.InfoLog("Server stopping client listener")
+//StopServer will stop running server
+func StopServer() {
+	core.InfoLog("Server stopping client listener")
 	httpServerLck.Lock()
 	for _, s := range httpServer {
 		s.Close()
@@ -159,14 +157,4 @@ func parseListenAddr(addr string) (addrs []string, err error) {
 		addrs = append(addrs, fmt.Sprintf("%v:%v", parts[0], i))
 	}
 	return
-}
-
-var serverKillSignal chan os.Signal
-
-func handlerServerKill() {
-	serverKillSignal = make(chan os.Signal, 1000)
-	signal.Notify(serverKillSignal, os.Kill, os.Interrupt)
-	v := <-serverKillSignal
-	cs.WarnLog("Server receive kill signal:%v", v)
-	stopServer()
 }

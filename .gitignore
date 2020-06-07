@@ -8,3 +8,8 @@ coversocks.exe
 build
 privoxy
 work
+privoxy.exe
+netstack/netcsock/test.ovpn
+netstack/netcsock/csocks.json
+*.aar
+*.jar

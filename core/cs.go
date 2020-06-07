@@ -1,4 +1,4 @@
-package cs
+package core
 
 import (
 	"encoding/binary"
@@ -377,12 +377,14 @@ func (c *Client) ProcConn(raw io.ReadWriteCloser, target string) (err error) {
 	if err != nil {
 		conn.SetErr(err)
 		conn.Close()
+		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
 		return
 	}
 	back, err := conn.ReadCmd()
 	if err != nil {
 		conn.SetErr(err)
 		conn.Close()
+		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
 		return
 	}
 	if back[0] != CmdConnBack {
@@ -390,12 +392,14 @@ func (c *Client) ProcConn(raw io.ReadWriteCloser, target string) (err error) {
 		WarnLog("Client will close connection(%v) by %v", conn, err)
 		conn.SetErr(err)
 		conn.Close()
+		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
 		return
 	}
 	backMessage := string(back[1:])
 	if backMessage != "ok" {
 		err = fmt.Errorf("%v", backMessage)
 		c.pushConn(conn)
+		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
 		return
 	}
 	DebugLog("Client start transfer %v to %v for %v", raw, conn, target)

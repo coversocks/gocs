@@ -1,4 +1,4 @@
-package cs
+package core
 
 import (
 	"crypto/sha1"
@@ -207,6 +207,50 @@ func remoteAddr(v interface{}) string {
 		return fmt.Sprintf("%v", netc.RemoteAddr())
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+//ConnWrapper is wrapper for net.Conn by ReadWriteCloser
+type ConnWrapper struct {
+	io.ReadWriteCloser
+}
+
+//NewConnWrapper will create new ConnWrapper
+func NewConnWrapper(base io.ReadWriteCloser) (wrapper *ConnWrapper) {
+	return &ConnWrapper{ReadWriteCloser: base}
+}
+
+//Network impl net.Addr
+func (c *ConnWrapper) Network() string {
+	return "wrapper"
+}
+
+func (c *ConnWrapper) String() string {
+	return fmt.Sprintf("%v", c.ReadWriteCloser)
+}
+
+//LocalAddr return then local network address
+func (c *ConnWrapper) LocalAddr() net.Addr {
+	return c
+}
+
+// RemoteAddr returns the remote network address.
+func (c *ConnWrapper) RemoteAddr() net.Addr {
+	return c
+}
+
+// SetDeadline impl net.Conn do nothing
+func (c *ConnWrapper) SetDeadline(t time.Time) error {
+	return nil
+}
+
+// SetReadDeadline impl net.Conn do nothing
+func (c *ConnWrapper) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline impl net.Conn do nothing
+func (c *ConnWrapper) SetWriteDeadline(t time.Time) error {
+	return nil
 }
 
 //TCPKeepAliveListener is normal tcp listner for set tcp connection keep alive

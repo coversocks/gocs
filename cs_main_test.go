@@ -1,4 +1,4 @@
-package main
+package gocs
 
 import (
 	"bufio"
@@ -19,25 +19,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coversocks/golang/cs"
 	"golang.org/x/net/websocket"
 )
 
 func init() {
 	privoxyPath = "./privoxy"
-	abpPath = "../abp.js"
-	gfwListPath = "../gfwlist.txt"
+	abpPath = "./abp.js"
+	gfwListPath = "./gfwlist.txt"
 	userRulesPath = "./work/user_rules.txt"
 	workDir = "./work/"
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("cp", "-f", "../privoxy-Darwin", "privoxy").CombinedOutput()
+		exec.Command("cp", "-f", "./privoxy-Darwin", "privoxy").CombinedOutput()
 		networksetupPath = "echo"
 	case "linux":
-		exec.Command("cp", "-f", "../privoxy-Linux", "privoxy").CombinedOutput()
+		exec.Command("cp", "-f", "./privoxy-Linux", "privoxy").CombinedOutput()
 		networksetupPath = "echo"
 	default:
-		exec.Command("powershell", "cp", "..\\privoxy-Win.exe", "privoxy.exe").CombinedOutput()
+		exec.Command("powershell", "cp", "privoxy-Win.exe", "privoxy.exe").CombinedOutput()
 		networksetupPath = "cmd"
 	}
 }
@@ -79,7 +78,7 @@ func httpGet(format string, args ...interface{}) (data string, err error) {
 func TestCS(t *testing.T) {
 	os.Args = []string{"xxx"}
 	os.RemoveAll(workDir)
-	exitf = func(code int) {}
+	// exitf = func(code int) {}
 	gfwMux := http.NewServeMux()
 	gfwMux.HandleFunc("/gfwlist.txt", func(w http.ResponseWriter, r *http.Request) {
 		writer := base64.NewEncoder(base64.StdEncoding, w)
@@ -96,13 +95,13 @@ func TestCS(t *testing.T) {
 	}()
 	wait.Add(1)
 	go func() {
-		err := startServer("coversocks-s.json")
+		err := StartServer("coversocks-s.json")
 		wait.Done()
 		fmt.Println("server done with", err)
 	}()
 	wait.Add(1)
 	go func() {
-		err := startClient("coversocks-c.json")
+		err := StartClient("coversocks-c.json")
 		wait.Done()
 		fmt.Println("client done with", err)
 	}()
@@ -110,10 +109,10 @@ func TestCS(t *testing.T) {
 	managerServerParts := strings.Split(managerServer.Addr, ":")
 	managerServer := fmt.Sprintf("http://127.0.0.1:%v", managerServerParts[len(managerServerParts)-1])
 	defer func() {
-		clientKillSignal <- os.Kill
-		time.Sleep(10 * time.Millisecond)
-		serverKillSignal <- os.Kill
-		time.Sleep(10 * time.Millisecond)
+		// clientKillSignal <- os.Kill
+		// time.Sleep(10 * time.Millisecond)
+		// serverKillSignal <- os.Kill
+		// time.Sleep(10 * time.Millisecond)
 		echoListner.Close()
 		wait.Wait()
 	}()
@@ -153,7 +152,7 @@ func TestCS(t *testing.T) {
 			t.Errorf("err:%v,%v", err, pac)
 			return
 		}
-		abpPath = "../abp.js"
+		abpPath = "./abp.js"
 		//
 		gfwListPath = "xxxx"
 		pac, err = httpGet("%v/pac.js", managerServer)
@@ -169,7 +168,7 @@ func TestCS(t *testing.T) {
 			return
 		}
 		os.Remove(testGfwList)
-		gfwListPath = "../gfwlist.txt"
+		gfwListPath = "./gfwlist.txt"
 		//
 		userRulesPath = "xxxx"
 		pac, err = httpGet("%v/pac.js", managerServer)
@@ -177,7 +176,7 @@ func TestCS(t *testing.T) {
 			t.Errorf("err:%v,%v", err, pac)
 			return
 		}
-		userRulesPath = "../user_rules.txt"
+		userRulesPath = "./user_rules.txt"
 		//
 		var old = proxyServer
 		proxyServer = nil
@@ -338,64 +337,64 @@ func fullBuf(r io.Reader, p []byte, length uint32, last *int64) error {
 	return nil
 }
 
-func TestStartConfError(t *testing.T) {
-	os.Args = []string{"xxx"}
-	exitf = func(code int) {}
-	os.RemoveAll("work")
-	os.Mkdir("work", os.ModePerm)
-	//
-	//
-	//not found
-	argConf = "work/none.json"
-	argRunServer = true
-	main()
-	//http addr error
-	cs.WriteJSON("work/s-http-addr-err.json", &ServerConf{
-		HTTPListenAddr: "xxx:1x",
-	})
-	argConf = "work/s-http-addr-err.json"
-	argRunServer = true
-	main()
-	//https addr error
-	cs.WriteJSON("work/s-https-addr-err.json", &ServerConf{
-		HTTPSListenAddr: "xxx:1x",
-	})
-	argConf = "work/s-https-addr-err.json"
-	argRunServer = true
-	main()
-	//
-	argRunServer = false
-	//
-	//
-	//not found
-	argConf = "work/none.json"
-	argRunClient = true
-	main()
-	//socks addr error
-	cs.WriteJSON("work/c-socks-addr-err.json", &ClientConf{})
-	argConf = "work/c-socks-addr-err.json"
-	argRunClient = true
-	main()
-	cs.WriteJSON("work/c-socks-addr-err.json", &ClientConf{
-		SocksAddr: ":xx",
-	})
-	argConf = "work/c-socks-addr-err.json"
-	argRunClient = true
-	main()
-	//manager addr error
-	cs.WriteJSON("work/c-manager-addr-err.json", &ClientConf{
-		SocksAddr:   ":0",
-		ManagerAddr: ":xx",
-	})
-	argConf = "work/c-manager-addr-err.json"
-	argRunClient = true
-	main()
-	//
-	argRunClient = false
-	//
-	//
-	//argument error
-	argRunClient = false
-	argRunServer = false
-	main()
-}
+// func TestStartConfError(t *testing.T) {
+// 	os.Args = []string{"xxx"}
+// 	exitf = func(code int) {}
+// 	os.RemoveAll("work")
+// 	os.Mkdir("work", os.ModePerm)
+// 	//
+// 	//
+// 	//not found
+// 	argConf = "work/none.json"
+// 	argRunServer = true
+// 	main()
+// 	//http addr error
+// 	core.WriteJSON("work/s-http-addr-err.json", &ServerConf{
+// 		HTTPListenAddr: "xxx:1x",
+// 	})
+// 	argConf = "work/s-http-addr-err.json"
+// 	argRunServer = true
+// 	main()
+// 	//https addr error
+// 	core.WriteJSON("work/s-https-addr-err.json", &ServerConf{
+// 		HTTPSListenAddr: "xxx:1x",
+// 	})
+// 	argConf = "work/s-https-addr-err.json"
+// 	argRunServer = true
+// 	main()
+// 	//
+// 	argRunServer = false
+// 	//
+// 	//
+// 	//not found
+// 	argConf = "work/none.json"
+// 	argRunClient = true
+// 	main()
+// 	//socks addr error
+// 	core.WriteJSON("work/c-socks-addr-err.json", &ClientConf{})
+// 	argConf = "work/c-socks-addr-err.json"
+// 	argRunClient = true
+// 	main()
+// 	core.WriteJSON("work/c-socks-addr-err.json", &ClientConf{
+// 		SocksAddr: ":xx",
+// 	})
+// 	argConf = "work/c-socks-addr-err.json"
+// 	argRunClient = true
+// 	main()
+// 	//manager addr error
+// 	core.WriteJSON("work/c-manager-addr-err.json", &ClientConf{
+// 		SocksAddr:   ":0",
+// 		ManagerAddr: ":xx",
+// 	})
+// 	argConf = "work/c-manager-addr-err.json"
+// 	argRunClient = true
+// 	main()
+// 	//
+// 	argRunClient = false
+// 	//
+// 	//
+// 	//argument error
+// 	argRunClient = false
+// 	argRunServer = false
+// 	main()
+// }

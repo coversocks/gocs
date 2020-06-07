@@ -1,4 +1,4 @@
-package cs
+package core
 
 import (
 	"fmt"

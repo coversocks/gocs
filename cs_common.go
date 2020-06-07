@@ -1,12 +1,10 @@
-package main
+package gocs
 
 import (
 	"os"
 	"os/exec"
 	"path/filepath"
 )
-
-var workDir = workDir_()
 
 func workDir_() (dir string) {
 	home, _ := os.UserHomeDir()
@@ -23,3 +21,5 @@ func execDir() (dir string) {
 	dir, _ = filepath.Abs(dir)
 	return
 }
+
+// var exitf = os.Exit

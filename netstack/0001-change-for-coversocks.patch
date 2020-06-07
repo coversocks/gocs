@@ -1,0 +1,176 @@
+From ce5e16787be32450c2deee1d2751f0255d203dcc Mon Sep 17 00:00:00 2001
+From: coversocks <covertlysocks@gmail.com>
+Date: Sun, 7 Jun 2020 00:38:22 +0800
+Subject: [PATCH] change for coversocks
+
+---
+ tcpip/stack/nic.go               |  6 ++++-
+ tcpip/stack/transport_demuxer.go |  7 ++++++
+ tcpip/tcpip.go                   |  3 +++
+ tcpip/transport/tcp/endpoint.go  | 11 +++++----
+ tcpip/transport/udp/endpoint.go  | 41 ++++++++++++++++++++++----------
+ 5 files changed, 50 insertions(+), 18 deletions(-)
+
+diff --git a/tcpip/stack/nic.go b/tcpip/stack/nic.go
+index bddcbee..ae67f9c 100644
+--- a/tcpip/stack/nic.go
++++ b/tcpip/stack/nic.go
+@@ -261,7 +261,11 @@ func (n *NIC) getRefOrCreateTemp(protocol tcpip.NetworkProtocolNumber, address t
+ 
+ 	n.mu.RLock()
+ 
+-	if ref, ok := n.endpoints[id]; ok {
++	for key, ref := range n.endpoints {
++		// match widely listen
++		if key != id && key.LocalAddress != header.IPv4Any && key.LocalAddress != header.IPv6Any {
++			continue
++		}
+ 		// An endpoint with this id exists, check if it can be used and return it.
+ 		switch ref.getKind() {
+ 		case permanentExpired:
+diff --git a/tcpip/stack/transport_demuxer.go b/tcpip/stack/transport_demuxer.go
+index 57aca6b..964576c 100644
+--- a/tcpip/stack/transport_demuxer.go
++++ b/tcpip/stack/transport_demuxer.go
+@@ -531,6 +531,13 @@ func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id Tr
+ 	if ep, ok := eps.endpoints[nid]; ok {
+ 		matchedEPs = append(matchedEPs, ep)
+ 	}
++
++	// Try to find a match with widely.
++	nid.LocalAddress = ""
++	nid.LocalPort = 0
++	if ep, ok := eps.endpoints[nid]; ok {
++		matchedEPs = append(matchedEPs, ep)
++	}
+ 	return matchedEPs
+ }
+ 
+diff --git a/tcpip/tcpip.go b/tcpip/tcpip.go
+index 077ca2f..eba253b 100644
+--- a/tcpip/tcpip.go
++++ b/tcpip/tcpip.go
+@@ -460,6 +460,9 @@ type EndpointStats interface {
+ 
+ // WriteOptions contains options for Endpoint.Write.
+ type WriteOptions struct {
++	// If From is not nil, write by the given address instead of the endpoint's
++	// peer.
++	From *FullAddress
+ 	// If To is not nil, write to the given address instead of the endpoint's
+ 	// peer.
+ 	To *FullAddress
+diff --git a/tcpip/transport/tcp/endpoint.go b/tcpip/transport/tcp/endpoint.go
+index 8b5f438..3978ad5 100644
+--- a/tcpip/transport/tcp/endpoint.go
++++ b/tcpip/transport/tcp/endpoint.go
+@@ -2025,11 +2025,12 @@ func (e *endpoint) Bind(addr tcpip.FullAddress) (err *tcpip.Error) {
+ 			header.IPv4ProtocolNumber,
+ 		}
+ 	}
+-
+-	port, err := e.stack.ReservePort(netProtos, ProtocolNumber, addr.Addr, addr.Port, e.reusePort, e.bindToDevice)
+-	if err != nil {
+-		return err
+-	}
++	// for widely listen
++	port := addr.Port
++	// port, err := e.stack.ReservePort(netProtos, ProtocolNumber, addr.Addr, addr.Port, e.reusePort, e.bindToDevice)
++	// if err != nil {
++	// 	return err
++	// }
+ 
+ 	e.isPortReserved = true
+ 	e.effectiveNetProtos = netProtos
+diff --git a/tcpip/transport/udp/endpoint.go b/tcpip/transport/udp/endpoint.go
+index 4531c7b..e8742fb 100644
+--- a/tcpip/transport/udp/endpoint.go
++++ b/tcpip/transport/udp/endpoint.go
+@@ -29,6 +29,7 @@ import (
+ type udpPacket struct {
+ 	udpPacketEntry
+ 	senderAddress tcpip.FullAddress
++	recverAddress tcpip.FullAddress
+ 	data          buffer.VectorisedView
+ 	timestamp     int64
+ }
+@@ -215,6 +216,10 @@ func (e *endpoint) IPTables() (iptables.IPTables, error) {
+ // Read reads data from the endpoint. This method does not block if
+ // there is no data pending.
+ func (e *endpoint) Read(addr *tcpip.FullAddress) (buffer.View, tcpip.ControlMessages, *tcpip.Error) {
++	return e.ReadFrom(addr, nil)
++}
++
++func (e *endpoint) ReadFrom(addr, to *tcpip.FullAddress) (buffer.View, tcpip.ControlMessages, *tcpip.Error) {
+ 	e.rcvMu.Lock()
+ 
+ 	if e.rcvList.Empty() {
+@@ -235,6 +240,9 @@ func (e *endpoint) Read(addr *tcpip.FullAddress) (buffer.View, tcpip.ControlMess
+ 	if addr != nil {
+ 		*addr = p.senderAddress
+ 	}
++	if to != nil {
++		*to = p.recverAddress
++	}
+ 
+ 	return p.data.ToView(), tcpip.ControlMessages{HasTimestamp: true, Timestamp: p.timestamp}, nil
+ }
+@@ -436,8 +444,12 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, <-c
+ 		// Multicast allows a 0 TTL.
+ 		useDefaultTTL = false
+ 	}
+-
+-	if err := sendUDP(route, buffer.View(v).ToVectorisedView(), e.ID.LocalPort, dstPort, ttl, useDefaultTTL, e.sendTOS); err != nil {
++	localPort := e.ID.LocalPort
++	if opts.From != nil {
++		localPort = opts.From.Port
++		route.LocalAddress = opts.From.Addr
++	}
++	if err := sendUDP(route, buffer.View(v).ToVectorisedView(), localPort, dstPort, ttl, useDefaultTTL, e.sendTOS); err != nil {
+ 		return 0, nil, err
+ 	}
+ 	return int64(len(v)), nil, nil
+@@ -1030,18 +1042,18 @@ func (*endpoint) Accept() (tcpip.Endpoint, *waiter.Queue, *tcpip.Error) {
+ }
+ 
+ func (e *endpoint) registerWithStack(nicID tcpip.NICID, netProtos []tcpip.NetworkProtocolNumber, id stack.TransportEndpointID) (stack.TransportEndpointID, *tcpip.Error) {
+-	if e.ID.LocalPort == 0 {
+-		port, err := e.stack.ReservePort(netProtos, ProtocolNumber, id.LocalAddress, id.LocalPort, e.reusePort, e.bindToDevice)
+-		if err != nil {
+-			return id, err
+-		}
+-		id.LocalPort = port
+-	}
++	// if e.ID.LocalPort == 0 {
++	// 	port, err := e.stack.ReservePort(netProtos, ProtocolNumber, id.LocalAddress, id.LocalPort, e.reusePort, e.bindToDevice)
++	// 	if err != nil {
++	// 		return id, err
++	// 	}
++	// 	id.LocalPort = port
++	// }
+ 
+ 	err := e.stack.RegisterTransportEndpoint(nicID, netProtos, ProtocolNumber, id, e, e.reusePort, e.bindToDevice)
+-	if err != nil {
+-		e.stack.ReleasePort(netProtos, ProtocolNumber, id.LocalAddress, id.LocalPort, e.bindToDevice)
+-	}
++	// if err != nil {
++	// e.stack.ReleasePort(netProtos, ProtocolNumber, id.LocalAddress, id.LocalPort, e.bindToDevice)
++	// }
+ 	return id, err
+ }
+ 
+@@ -1205,6 +1217,11 @@ func (e *endpoint) HandlePacket(r *stack.Route, id stack.TransportEndpointID, pk
+ 			Addr: id.RemoteAddress,
+ 			Port: hdr.SourcePort(),
+ 		},
++		recverAddress: tcpip.FullAddress{
++			NIC:  r.NICID(),
++			Addr: id.LocalAddress,
++			Port: hdr.DestinationPort(),
++		},
+ 	}
+ 	packet.data = pkt.Data
+ 	e.rcvList.PushBack(packet)
+-- 
+2.22.0
+

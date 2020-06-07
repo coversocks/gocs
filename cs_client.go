@@ -1,4 +1,4 @@
-package main
+package gocs
 
 import (
 	"encoding/base64"
@@ -9,24 +9,24 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/coversocks/golang/cs"
+	"github.com/coversocks/gocs/core"
 )
 
-var clientConf string
-var clientConfDir string
-var client *cs.Client
-var proxyServer *cs.SocksProxy
+// var clientConf string
+// var clientConfDir string
+var client *Client
+var proxyServer *core.SocksProxy
 var managerServer *http.Server
 var managerListener net.Listener
-var abpPath = filepath.Join(execDir(), "abp.js")
-var gfwListPath = filepath.Join(execDir(), "gfwlist.txt")
-var userRulesPath = filepath.Join(execDir(), "user_rules.txt")
+
+// var abpPath = filepath.Join(execDir(), "abp.js")
+// var gfwListPath = filepath.Join(execDir(), "gfwlist.txt")
+// var userRulesPath = filepath.Join(execDir(), "user_rules.txt")
 var gfwListURL = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
 
 //ClientServerConf is pojo for dark socks server configure
@@ -36,11 +36,17 @@ type ClientServerConf struct {
 	Address  []string `json:"address"`
 	Username string   `json:"username"`
 	Password string   `json:"password"`
-	LastUsed int      `json:"-"`
 }
 
-//Dial imp cs.Dialer
-func (c *ClientServerConf) Dial(remote string) (raw io.ReadWriteCloser, err error) {
+//ClientServerDialer is dialer by ClientServerConf
+type ClientServerDialer struct {
+	*ClientServerConf
+	LastUsed int
+	Base     core.Dialer
+}
+
+//Dial imp core.Dialer
+func (c *ClientServerDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 	address := c.Address[c.LastUsed]
 	if len(c.Username) > 0 && len(c.Password) > 0 {
 		if strings.Contains(address, "?") {
@@ -49,21 +55,21 @@ func (c *ClientServerConf) Dial(remote string) (raw io.ReadWriteCloser, err erro
 			address += fmt.Sprintf("?username=%v&password=%v", c.Username, c.Password)
 		}
 	}
-	cs.InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
-	raw, err = cs.WebsocketDialer("").Dial(address)
+	core.InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
+	raw, err = c.Base.Dial(address)
 	if err == nil {
-		cs.InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
-		conn := cs.NewStringConn(raw)
+		core.InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
+		conn := core.NewStringConn(raw)
 		conn.Name = c.Name
 		raw = conn
 	} else {
-		cs.WarnLog("Client connect one channel to %v-%v fail with %v", c.Name, c.LastUsed, err)
+		core.WarnLog("Client connect one channel to %v-%v fail with %v", c.Name, c.LastUsed, err)
 	}
 	c.LastUsed = (c.LastUsed + 1) % len(c.Address)
 	return
 }
 
-func (c *ClientServerConf) String() string {
+func (c *ClientServerDialer) String() string {
 	return c.Name
 }
 
@@ -76,28 +82,68 @@ type ClientConf struct {
 	Mode        string              `json:"mode"`
 	LogLevel    int                 `json:"log"`
 	WorkDir     string              `json:"work_dir"`
-	Dialer      cs.Dialer           `json:"-"`
+}
+
+//Client is dialer by ClientConf
+type Client struct {
+	*core.Client
+	Conf     ClientConf
+	WorkDir  string //current working dir
+	ConfPath string
 }
 
 //Boostrap will initial setting
-func (c *ClientConf) Boostrap() (err error) {
-	var dialers = []cs.Dialer{}
-	for _, conf := range c.Servers {
+func (c *Client) Boostrap(base core.Dialer) (err error) {
+	var dialers = []core.Dialer{}
+	for _, conf := range c.Conf.Servers {
 		if conf.Enable && len(conf.Address) > 0 {
-			dialers = append(dialers, conf)
+			dialers = append(dialers, &ClientServerDialer{Base: base, ClientServerConf: conf})
 		}
 	}
-	c.Dialer = cs.NewSortedDialer(dialers...)
+	var dialer = core.NewSortedDialer(dialers...)
+	c.Client = core.NewClient(core.DefaultBufferSize, dialer)
+	core.InfoLog("Client boostrap with %v server dialer", len(dialers))
 	return
 }
 
-//PAC is http handler to get pac js
-func (c *ClientConf) PAC(res http.ResponseWriter, req *http.Request) {
+//ReadGfwRules will read the gfwlist.txt and append user_rules
+func (c *Client) ReadGfwRules() (rules []string, err error) {
+	gfwFile := filepath.Join(c.WorkDir, "gfwlist.txt")
+	userFile := filepath.Join(c.WorkDir, "user_rules.txt")
+	core.DebugLog("Client read gfw rule from %v", gfwFile)
+	rules, err = ReadGfwlist(gfwFile)
+	if err == nil {
+		core.DebugLog("Client read user rule from %v", userFile)
+		userRules, _ := ReadUserRules(userFile)
+		rules = append(rules, userRules...)
+	}
+	return
+}
+
+//UpdateGfwlist will update the gfwlist.txt
+func (c *Client) UpdateGfwlist() (err error) {
+	if c.Client == nil {
+		err = fmt.Errorf("proxy server is not started")
+		return
+	}
+	gfwData, err := c.Client.HTTPGet(gfwListURL)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(c.WorkDir, os.ModePerm)
+	gfwFile := filepath.Join(c.WorkDir, "gfwlist.txt")
+	err = ioutil.WriteFile(gfwFile, gfwData, os.ModePerm)
+	return
+}
+
+//PACH is http handler to get pac js
+func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", "application/x-javascript")
 	//
+	abpPath := filepath.Join(c.WorkDir, "abp.js")
 	abpRaw, err := ioutil.ReadFile(abpPath)
 	if err != nil {
-		cs.ErrorLog("PAC read apb.js fail with %v", err)
+		core.ErrorLog("PAC read apb.js fail with %v", err)
 		res.WriteHeader(500)
 		fmt.Fprintf(res, "%v", err)
 		return
@@ -105,21 +151,19 @@ func (c *ClientConf) PAC(res http.ResponseWriter, req *http.Request) {
 	abpStr := string(abpRaw)
 	//
 	//rules
-	gfwRules, err := readGfwlist()
+	gfwRules, err := c.ReadGfwRules()
 	if err != nil {
-		cs.ErrorLog("PAC read gfwlist.txt fail with %v", err)
+		core.ErrorLog("PAC read gfwlist.txt fail with %v", err)
 		res.WriteHeader(500)
 		fmt.Fprintf(res, "%v", err)
 		return
 	}
-	userRules, _ := readUserRules()
-	gfwRules = append(gfwRules, userRules...)
 	gfwRulesJS, _ := json.Marshal(gfwRules)
 	abpStr = strings.Replace(abpStr, "__RULES__", string(gfwRulesJS), 1)
 	//
 	//proxy address
 	if proxyServer == nil || proxyServer.Listener == nil {
-		cs.ErrorLog("PAC load fail with socks proxy server is not started")
+		core.ErrorLog("PAC load fail with socks proxy server is not started")
 		res.WriteHeader(500)
 		fmt.Fprintf(res, "%v", "socks proxy server is not started")
 		return
@@ -132,8 +176,8 @@ func (c *ClientConf) PAC(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte(abpStr))
 }
 
-//ChangeProxyMode is http handler to change proxy mode
-func (c *ClientConf) ChangeProxyMode(w http.ResponseWriter, r *http.Request) {
+//ChangeProxyModeH is http handler to change proxy mode
+func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
 	_, err := changeProxyMode(mode)
 	if err != nil {
@@ -141,8 +185,8 @@ func (c *ClientConf) ChangeProxyMode(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%v", err)
 		return
 	}
-	c.Mode = mode
-	err = cs.WriteJSON(clientConf, c)
+	c.Conf.Mode = mode
+	err = core.WriteJSON(c.ConfPath, c.Conf)
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "%v", err)
@@ -151,9 +195,9 @@ func (c *ClientConf) ChangeProxyMode(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%v", "ok")
 }
 
-//UpdateGfwlist is http handler to update gfwlist.txt
-func (c *ClientConf) UpdateGfwlist(w http.ResponseWriter, r *http.Request) {
-	err := updateGfwlist()
+//UpdateGfwlistH is http handler to update gfwlist.txt
+func (c *Client) UpdateGfwlistH(w http.ResponseWriter, r *http.Request) {
+	err := c.UpdateGfwlist()
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "%v", err)
@@ -162,10 +206,10 @@ func (c *ClientConf) UpdateGfwlist(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%v", "ok")
 }
 
-//State is http handler to show client state
-func (c *ClientConf) State(w http.ResponseWriter, r *http.Request) {
+//StateH is http handler to show client state
+func (c *Client) StateH(w http.ResponseWriter, r *http.Request) {
 	res := map[string]interface{}{}
-	if d, ok := c.Dialer.(cs.Statable); ok {
+	if d, ok := c.Client.Dialer.(core.Statable); ok {
 		res["dialers"] = d.State()
 	}
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
@@ -173,55 +217,59 @@ func (c *ClientConf) State(w http.ResponseWriter, r *http.Request) {
 	encoder.Encode(res)
 }
 
-func startClient(c string) (err error) {
-	conf := &ClientConf{Mode: "auto"}
-	err = cs.ReadJSON(c, &conf)
+//StartClient by configure
+func StartClient(c string) (err error) {
+	return StartDialerClient(c, core.NewWebsocketDialer())
+}
+
+//StartDialerClient by configure and dialer
+func StartDialerClient(c string, base core.Dialer) (err error) {
+	conf := ClientConf{Mode: "auto"}
+	err = core.ReadJSON(c, &conf)
 	if err != nil {
-		cs.ErrorLog("Client read configure fail with %v", err)
-		exitf(1)
+		core.ErrorLog("Client read configure fail with %v", err)
 		return
 	}
 	if len(conf.SocksAddr) < 1 {
-		cs.ErrorLog("Client socks_addr is required")
-		exitf(1)
+		core.ErrorLog("Client socks_addr is required")
+		err = fmt.Errorf("Client socks_addr is required")
 		return
 	}
-	clientConf = c
-	clientConfDir = filepath.Dir(clientConf)
+	// clientConf = c
+	// clientConfDir = filepath.Dir(clientConf)
+	var workDir = workDir_()
 	if len(conf.WorkDir) > 0 {
 		os.MkdirAll(workDir, os.ModePerm)
 		workDir = conf.WorkDir
 	}
-	cs.SetLogLevel(conf.LogLevel)
-	cs.InfoLog("Client using config from %v", c)
-	conf.Boostrap()
-	client = cs.NewClient(cs.DefaultBufferSize, conf.Dialer)
-	proxyServer = cs.NewSocksProxy()
+	core.SetLogLevel(conf.LogLevel)
+	core.InfoLog("Client using config from %v", c)
+	client = &Client{Conf: conf, WorkDir: workDir}
+	client.Boostrap(base)
+	proxyServer = core.NewSocksProxy()
 	proxyServer.Dialer = func(target string, raw io.ReadWriteCloser) (sid uint64, err error) {
-		err = client.ProcConn(raw, target)
+		err = client.ProcConn(raw, "tcp://"+target)
 		return
 	}
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/pac.js", conf.PAC)
-		mux.HandleFunc("/changeProxyMode", conf.ChangeProxyMode)
-		mux.HandleFunc("/updateGfwlist", conf.UpdateGfwlist)
-		mux.HandleFunc("/state", conf.State)
+		mux.HandleFunc("/pac.js", client.PACH)
+		mux.HandleFunc("/changeProxyMode", client.ChangeProxyModeH)
+		mux.HandleFunc("/updateGfwlist", client.UpdateGfwlistH)
+		mux.HandleFunc("/state", client.StateH)
 		var listener net.Listener
 		managerServer = &http.Server{Addr: conf.ManagerAddr, Handler: mux}
 		listener, err = net.Listen("tcp", conf.ManagerAddr)
 		if err != nil {
-			cs.ErrorLog("Client start web server fail with %v", err)
-			exitf(1)
+			core.ErrorLog("Client start web server fail with %v", err)
 			return
 		}
 		managerServer.Addr = listener.Addr().String()
-		managerListener = &cs.TCPKeepAliveListener{TCPListener: listener.(*net.TCPListener)}
+		managerListener = &core.TCPKeepAliveListener{TCPListener: listener.(*net.TCPListener)}
 	}
 	err = proxyServer.Listen(conf.SocksAddr)
 	if err != nil {
-		cs.ErrorLog("Client start proxy server fail with %v", err)
-		exitf(1)
+		core.ErrorLog("Client start proxy server fail with %v", err)
 		return
 	}
 	changeProxyMode(conf.Mode)
@@ -229,10 +277,10 @@ func startClient(c string) (err error) {
 	wait := sync.WaitGroup{}
 	if managerServer != nil {
 		wait.Add(1)
-		cs.InfoLog("Client start web server on %v", managerListener.Addr())
+		core.InfoLog("Client start web server on %v", managerListener.Addr())
 		go func() {
 			xerr := managerServer.Serve(managerListener)
-			cs.WarnLog("Client the web server on %v is stopped by %v", managerListener.Addr(), xerr)
+			core.WarnLog("Client the web server on %v is stopped by %v", managerListener.Addr(), xerr)
 			wait.Done()
 		}()
 	}
@@ -240,21 +288,21 @@ func startClient(c string) (err error) {
 		wait.Add(1)
 		proxyServer.HTTPUpstream = conf.HTTPAddr
 		go func() {
-			xerr := runPrivoxy(conf.HTTPAddr)
-			cs.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
+			xerr := runPrivoxy(workDir, conf.HTTPAddr)
+			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
 			wait.Done()
 		}()
 	}
-	go handlerClientKill()
 	proxyServer.Run()
-	cs.InfoLog("Client all listener is stopped")
+	core.InfoLog("Client all listener is stopped")
 	changeProxyMode("manual")
 	wait.Wait()
 	return
 }
 
-func stopClient() {
-	cs.InfoLog("Client stopping client listener")
+//StopClient will stop running client
+func StopClient() {
+	core.InfoLog("Client stopping client listener")
 	if proxyServer != nil {
 		proxyServer.Close()
 	}
@@ -269,16 +317,6 @@ func stopClient() {
 	}
 }
 
-var clientKillSignal chan os.Signal
-
-func handlerClientKill() {
-	clientKillSignal = make(chan os.Signal, 1000)
-	signal.Notify(clientKillSignal, os.Kill, os.Interrupt)
-	v := <-clientKillSignal
-	cs.WarnLog("Clien receive kill signal:%v", v)
-	stopClient()
-}
-
 func changeProxyMode(mode string) (message string, err error) {
 	if proxyServer == nil || proxyServer.Listener == nil || managerServer == nil {
 		err = fmt.Errorf("proxy server is not started")
@@ -289,32 +327,27 @@ func changeProxyMode(mode string) (message string, err error) {
 	switch mode {
 	case "auto":
 		pacURL := fmt.Sprintf("http://127.0.0.1:%v/pac.js?timestamp=%v", managerServerParts[len(managerServerParts)-1], time.Now().Local().UnixNano()/1e6)
-		cs.InfoLog("start change proxy mode to %v by %v", mode, pacURL)
+		core.InfoLog("start change proxy mode to %v by %v", mode, pacURL)
 		message, err = changeProxyModeNative("auto", pacURL)
 	case "global":
-		cs.InfoLog("start change proxy mode to %v by 127.0.0.1:%v", mode, proxyServerParts[len(proxyServerParts)-1])
+		core.InfoLog("start change proxy mode to %v by 127.0.0.1:%v", mode, proxyServerParts[len(proxyServerParts)-1])
 		message, err = changeProxyModeNative("global", "127.0.0.1", proxyServerParts[len(proxyServerParts)-1])
 	default:
 		message, err = changeProxyModeNative("manual")
 	}
 	if err != nil {
-		cs.WarnLog("change proxy mode to %v fail with %v, the log is\n%v\n", mode, err, message)
+		core.WarnLog("change proxy mode to %v fail with %v, the log is\n%v\n", mode, err, message)
 	} else {
-		cs.InfoLog("change proxy mode to %v is success", mode)
+		core.InfoLog("change proxy mode to %v is success", mode)
 	}
 	return
 }
 
-func readGfwlist() (rules []string, err error) {
-	gfwFile := filepath.Join(workDir, "gfwlist.txt")
+//ReadGfwlist will read and decode gfwlist file
+func ReadGfwlist(gfwFile string) (rules []string, err error) {
 	gfwRaw, err := ioutil.ReadFile(gfwFile)
 	if err != nil {
-		gfwFile = gfwListPath
-		gfwRaw, err = ioutil.ReadFile(gfwFile)
-		if err != nil {
-			err = fmt.Errorf("read gfwlist.txt fail with %v", err)
-			return
-		}
+		return
 	}
 	gfwData, err := base64.StdEncoding.DecodeString(string(gfwRaw))
 	if err != nil {
@@ -331,16 +364,11 @@ func readGfwlist() (rules []string, err error) {
 	return
 }
 
-func readUserRules() (rules []string, err error) {
-	gfwFile := filepath.Join(workDir, "user_rules.txt")
+//ReadUserRules will read and decode user rules
+func ReadUserRules(gfwFile string) (rules []string, err error) {
 	gfwData, err := ioutil.ReadFile(gfwFile)
 	if err != nil {
-		gfwFile = userRulesPath
-		gfwData, err = ioutil.ReadFile(gfwFile)
-		if err != nil {
-			err = fmt.Errorf("read gfwlist.txt fail with %v", err)
-			return
-		}
+		return
 	}
 	gfwRulesAll := strings.Split(string(gfwData), "\n")
 	for _, rule := range gfwRulesAll {
@@ -350,21 +378,6 @@ func readUserRules() (rules []string, err error) {
 		}
 		rules = append(rules, rule)
 	}
-	return
-}
-
-func updateGfwlist() (err error) {
-	if client == nil {
-		err = fmt.Errorf("proxy server is not started")
-		return
-	}
-	gfwData, err := client.HTTPGet(gfwListURL)
-	if err != nil {
-		return
-	}
-	os.MkdirAll(workDir, os.ModePerm)
-	gfwFile := filepath.Join(workDir, "gfwlist.txt")
-	err = ioutil.WriteFile(gfwFile, gfwData, os.ModePerm)
 	return
 }
 
@@ -401,14 +414,14 @@ func writePrivoxyConf(confFile, httpAddr, socksAddr string) (err error) {
 	return
 }
 
-func runPrivoxy(httpAddr string) (err error) {
+func runPrivoxy(workDir, httpAddr string) (err error) {
 	proxyServerParts := strings.SplitN(proxyServer.Addr().String(), ":", -1)
 	socksAddr := fmt.Sprintf("127.0.0.1:%v", proxyServerParts[len(proxyServerParts)-1])
-	cs.InfoLog("Client start privoxy by listening http proxy on %v and forwarding to %v", httpAddr, socksAddr)
+	core.InfoLog("Client start privoxy by listening http proxy on %v and forwarding to %v", httpAddr, socksAddr)
 	confFile := filepath.Join(workDir, "privoxy.conf")
 	err = writePrivoxyConf(confFile, httpAddr, socksAddr)
 	if err != nil {
-		cs.WarnLog("Client save privoxy config to %v fail with %v", confFile, err)
+		core.WarnLog("Client save privoxy config to %v fail with %v", confFile, err)
 		return
 	}
 	err = runPrivoxyNative(confFile)

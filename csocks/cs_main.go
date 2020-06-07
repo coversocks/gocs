@@ -4,6 +4,10 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/signal"
+
+	"github.com/coversocks/gocs"
+	"github.com/coversocks/gocs/core"
 )
 
 var argConf string
@@ -21,12 +25,32 @@ func main() {
 	log.SetFlags(log.Lshortfile | log.Ldate | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
 	if argRunServer {
-		startServer(argConf)
+		go handlerServerKill()
+		gocs.StartServer(argConf)
 	} else if argRunClient {
-		startClient(argConf)
+		go handlerClientKill()
+		gocs.StartClient(argConf)
 	} else {
 		flag.Usage()
 	}
 }
 
-var exitf = os.Exit
+var serverKillSignal chan os.Signal
+
+func handlerServerKill() {
+	serverKillSignal = make(chan os.Signal, 1000)
+	signal.Notify(serverKillSignal, os.Kill, os.Interrupt)
+	v := <-serverKillSignal
+	core.WarnLog("Server receive kill signal:%v", v)
+	gocs.StopServer()
+}
+
+var clientKillSignal chan os.Signal
+
+func handlerClientKill() {
+	clientKillSignal = make(chan os.Signal, 1000)
+	signal.Notify(clientKillSignal, os.Kill, os.Interrupt)
+	v := <-clientKillSignal
+	core.WarnLog("Clien receive kill signal:%v", v)
+	gocs.StopClient()
+}

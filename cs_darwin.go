@@ -1,4 +1,4 @@
-package main
+package gocs
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-var networksetupPath = filepath.Join(execDir(), "networksetup-linux.sh")
+var networksetupPath = filepath.Join(execDir(), "networksetup-osx.sh")
 
 func changeProxyModeNative(args ...string) (message string, err error) {
 	out, err := exec.Command(networksetupPath, args...).CombinedOutput()

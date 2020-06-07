@@ -11,13 +11,13 @@ output=build
 
 #### Package ####
 srv_name=coversocks
-srv_ver=0.2.0
+srv_ver=1.0.0
 srv_out=$output/$srv_name
 rm -rf $srv_out
 mkdir -p $srv_out
 ##build normal
 echo "Build $srv_name normal executor..."
-go build -o $srv_out/csocks github.com/coversocks/golang/csocks
+go build -o $srv_out/csocks github.com/coversocks/gocs/csocks
 cp -f coversocks-install.sh $srv_out
 cp -f cert.sh $srv_out
 cp -f coversocks.service $srv_out
