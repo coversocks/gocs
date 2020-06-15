@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -11,8 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"golang.org/x/net/websocket"
 )
+
+func init() {
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
+}
 
 func TestWebsocketDialer(t *testing.T) {
 	{ //auth test
@@ -88,7 +98,7 @@ func TestWebsocketDialer(t *testing.T) {
 }
 
 func TestNetDialer(t *testing.T) {
-	dialer := NewNetDialer("114.114.114.114:53")
+	dialer := NewNetDialer("", "114.114.114.114:53")
 	_, err := dialer.Dial("tcp://127.0.0.1:80")
 	if err != nil {
 		t.Error(err)
@@ -230,7 +240,7 @@ func TestSortedDialer(t *testing.T) {
 
 func TestMessageDialer(t *testing.T) {
 	wg := sync.WaitGroup{}
-	dialer := NewMessageDialer([]byte("m"))
+	dialer := NewMessageDialer([]byte("m"), 1024)
 	go func() {
 		for {
 			buf := make([]byte, 1024)
@@ -264,6 +274,7 @@ func TestMessageDialer(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		var sended, recved int
 		go func() {
 			for {
 				buf := make([]byte, 1024)
@@ -271,16 +282,26 @@ func TestMessageDialer(t *testing.T) {
 				if err != nil {
 					break
 				}
+				recved += n
 				fmt.Printf("conn recv %v\n", string(buf[:n]))
-				wg.Done()
 			}
 			wg.Done()
 		}()
-		wg.Add(10)
 		for i := 0; i < 10; i++ {
-			fmt.Fprintf(conn, "data-%v\n", 1000+i)
+			n, err := fmt.Fprintf(conn, "data-%v\n", i*i*i)
+			if err != nil {
+				break
+			}
+			sended += n
+			fmt.Printf("conn send %v\n", sended)
 		}
-		wg.Wait()
+		for recved < sended {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if sended != recved {
+			t.Errorf("sended:%v,recved:%v", sended, recved)
+			return
+		}
 		wg.Add(1)
 		buf := make([]byte, 10)
 		copy(buf, dialer.Header)
@@ -299,7 +320,7 @@ func TestMessageDialer(t *testing.T) {
 		go func() {
 			for {
 				buf := make([]byte, 10)
-				_, err := conn.Read(buf)
+				_, err := conn.(*MessageConn).rawRead(buf)
 				if err != nil {
 					break
 				}
@@ -343,22 +364,17 @@ func TestMessageDialer(t *testing.T) {
 	//test error
 	err = conn.(*MessageConn).Connect()
 	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
+		t.Error(err)
 		return
 	}
 	_, err = conn.Write(nil)
 	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
-		return
-	}
-	_, err = conn.Read(nil)
-	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
+		t.Error(err)
 		return
 	}
 	err = conn.Close()
 	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
+		t.Error(err)
 		return
 	}
 	//
@@ -378,15 +394,10 @@ func TestMessageDialer(t *testing.T) {
 		t.Error("nil")
 		return
 	}
-	_, err = dialer.Read(nil)
-	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
-		return
-	}
-	dialer2 := NewMessageDialer([]byte("m"))
+	dialer2 := NewMessageDialer([]byte("m"), 1024)
 	dialer2.Message <- make([]byte, 10240)
 	_, err = dialer2.Read(make([]byte, 100))
-	if err == nil || err.Error() != "buffer is too small" {
+	if err == nil || !strings.HasPrefix(err.Error(), "buffer is too small") {
 		t.Error(err)
 		return
 	}
@@ -399,6 +410,29 @@ func TestMessageDialer(t *testing.T) {
 	_, err = dialer2.Write(make([]byte, 1024))
 	if err == nil || err.Error() != "unknow command(0)" {
 		t.Error(err)
+		return
+	}
+}
+
+func TestMessageDialeEchor(t *testing.T) {
+	dialer := NewMessageDialer([]byte("m"), 1024)
+	dialer.StartEcho(10240)
+	conn, err := dialer.Dial("tcp", "eco")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	fmt.Fprintf(conn, "testing-%v", 100)
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil || string(buf[0:n]) != "testing-100" {
+		t.Error(err)
+		return
+	}
+	dialer.Close()
+	_, err = conn.Read(buf)
+	if err == nil {
+		t.Error("error")
 		return
 	}
 }

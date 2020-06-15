@@ -189,6 +189,7 @@ func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	err = core.WriteJSON(c.ConfPath, c.Conf)
 	if err != nil {
 		w.WriteHeader(500)
+		core.WarnLog("Client change proxy mode on config %v fail with %v", c.ConfPath, err)
 		fmt.Fprintf(w, "%v", err)
 		return
 	}
@@ -217,6 +218,10 @@ func (c *Client) StateH(w http.ResponseWriter, r *http.Request) {
 	encoder.Encode(res)
 }
 
+func (c *Client) String() string {
+	return "CoverSocksClient"
+}
+
 //StartClient by configure
 func StartClient(c string) (err error) {
 	return StartDialerClient(c, core.NewWebsocketDialer())
@@ -237,14 +242,18 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 	}
 	// clientConf = c
 	// clientConfDir = filepath.Dir(clientConf)
-	var workDir = workDir_()
+	var workDir = filepath.Dir(c)
 	if len(conf.WorkDir) > 0 {
-		os.MkdirAll(workDir, os.ModePerm)
-		workDir = conf.WorkDir
+		if filepath.IsAbs(conf.WorkDir) {
+			workDir = conf.WorkDir
+		} else {
+			workDir = filepath.Join(workDir, conf.WorkDir)
+		}
+		workDir, _ = filepath.Abs(workDir)
 	}
 	core.SetLogLevel(conf.LogLevel)
-	core.InfoLog("Client using config from %v", c)
-	client = &Client{Conf: conf, WorkDir: workDir}
+	core.InfoLog("Client using config from %v, work on %v", c, workDir)
+	client = &Client{ConfPath: c, Conf: conf, WorkDir: workDir}
 	client.Boostrap(base)
 	proxyServer = core.NewSocksProxy()
 	proxyServer.Dialer = func(target string, raw io.ReadWriteCloser) (sid uint64, err error) {

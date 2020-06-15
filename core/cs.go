@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -25,6 +26,7 @@ type Conn interface {
 	Close() (err error)
 	SetErr(err error)
 	PreErr() (err error)
+	LastUsed() (latest time.Time)
 }
 
 //connSequence is the sequence to create Conn.ID()
@@ -37,6 +39,7 @@ type BaseConn struct {
 	offset uint32
 	length uint32
 	raw    io.ReadWriter
+	latest time.Time
 	Err    error
 }
 
@@ -61,6 +64,7 @@ func (b *BaseConn) readMore() (err error) {
 	if err == nil {
 		b.length += uint32(readed)
 	}
+	b.latest = time.Now()
 	return
 }
 
@@ -104,11 +108,39 @@ func (b *BaseConn) ReadCmd() (cmd []byte, err error) {
 	return
 }
 
+func (b *BaseConn) Read(p []byte) (n int, err error) {
+	data, err := b.ReadCmd()
+	if err == nil {
+		n = copy(p, data)
+	}
+	return
+}
+
 //WriteCmd will write data by command mode
 func (b *BaseConn) WriteCmd(cmd []byte) (w int, err error) {
 	binary.BigEndian.PutUint32(cmd, uint32(len(cmd)))
 	cmd[0] = byte(rand.Intn(255))
 	w, err = b.raw.Write(cmd)
+	// if err == nil {
+	// 	fmt.Printf("Cmd Write %v %v\n", len(cmd), cmd)
+	// }
+	b.latest = time.Now()
+	return
+}
+
+func (b *BaseConn) Write(p []byte) (n int, err error) {
+	// fmt.Printf("Conn Begin %v %v\n", len(p), p)
+	buf := make([]byte, len(p)+4)
+	copy(buf[4:], p)
+	n = len(buf)
+	// fmt.Printf("Conn Write %v,%v %v\n", len(buf), len(p), buf)
+	_, err = b.WriteCmd(buf)
+	return
+}
+
+//LastUsed will return last used time
+func (b *BaseConn) LastUsed() (latest time.Time) {
+	latest = b.latest
 	return
 }
 
@@ -283,6 +315,7 @@ type Client struct {
 	idles      map[uint64]Conn
 	connsLck   sync.RWMutex
 	BufferSize int
+	MaxIdle    int
 	Dialer     Dialer
 	HTTPClient *http.Client
 }
@@ -293,6 +326,7 @@ func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 		conns:      map[uint64]Conn{},
 		idles:      map[uint64]Conn{},
 		connsLck:   sync.RWMutex{},
+		MaxIdle:    100,
 		BufferSize: bufferSize,
 		Dialer:     dialer,
 	}
@@ -360,6 +394,21 @@ func (c *Client) pullConn() (conn Conn, err error) {
 //pushConn will push one Conn to idle pool
 func (c *Client) pushConn(conn Conn) {
 	c.connsLck.Lock()
+	if len(c.idles) > c.MaxIdle {
+		var oldestTime = time.Now()
+		var oldest Conn
+		for _, c := range c.idles {
+			last := c.LastUsed()
+			if oldestTime.Sub(last) > 0 {
+				oldestTime = last
+				oldest = c
+			}
+		}
+		if oldest != nil {
+			DebugLog("Client remove one oldest channel for idle pool is full")
+			oldest.Close()
+		}
+	}
 	c.idles[conn.ID()] = conn
 	c.connsLck.Unlock()
 	DebugLog("Client push one channel to idle pool")

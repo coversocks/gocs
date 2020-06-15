@@ -12,8 +12,8 @@ echo "Installing Dependence"
 #########Running Test#########
 echo "Running Test"
 pkgs="\
- github.com/coversocks/golang/cs\
- github.com/coversocks/golang/csocks\
+ github.com/coversocks/gocs/core\
+ github.com/coversocks/gocs/csocks\
 "
 
 if [ ! -f coversocks/cscert.crt ];then

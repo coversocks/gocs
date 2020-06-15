@@ -45,7 +45,7 @@ func StartServer(c string) (err error) {
 		userFile, _ = filepath.Abs(filepath.Join(serverConfDir, userFile))
 	}
 	auth := core.NewJSONFileAuth(conf.Manager, userFile)
-	dialer := core.NewNetDialer(conf.DNSServer)
+	dialer := core.NewNetDialer("", conf.DNSServer)
 	server := core.NewServer(core.DefaultBufferSize, dialer)
 	mux := http.NewServeMux()
 	mux.Handle("/ds", websocket.Handler(func(ws *websocket.Conn) {

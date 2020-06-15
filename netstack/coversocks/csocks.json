@@ -1,0 +1,9 @@
+{
+    "servers": [],
+    "socks_addr": "0.0.0.0:1105",
+    "http_addr": "0.0.0.0:1103",
+    "manager_addr": "127.0.0.1:1101",
+    "mode": "manual",
+    "log": 41,
+    "work_dir":"../../"
+}

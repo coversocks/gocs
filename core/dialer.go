@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bufio"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
@@ -81,7 +82,7 @@ func NewDialerWrapper(d Dialer) (dialer *DialerWrapper) {
 
 //Dial to remote
 func (d *DialerWrapper) Dial(network, address string) (conn net.Conn, err error) {
-	raw, err := d.Dialer.Dial(network + "://" + network)
+	raw, err := d.Dialer.Dial(network + "://" + address)
 	if err == nil {
 		conn = NewConnWrapper(raw)
 	}
@@ -90,21 +91,34 @@ func (d *DialerWrapper) Dial(network, address string) (conn net.Conn, err error)
 
 //NetDialer is an implementation of Dialer by net
 type NetDialer struct {
-	DNS string
-	UDP RawDialer
-	TCP RawDialer
+	DNS               string
+	UDP               RawDialer
+	TCP               RawDialer
+	udpRead, udpWrite uint64
 }
 
 //NewNetDialer will create new NetDialer
-func NewNetDialer(dns string) (dialer *NetDialer) {
+func NewNetDialer(bind, dns string) (dialer *NetDialer) {
+	udp := &net.Dialer{
+		Timeout: 5 * time.Second,
+	}
+	if len(bind) > 0 {
+		udp.LocalAddr = &net.UDPAddr{
+			IP: net.ParseIP(bind),
+		}
+	}
+	tcp := &net.Dialer{
+		Timeout: 5 * time.Second,
+	}
+	if len(bind) > 0 {
+		tcp.LocalAddr = &net.TCPAddr{
+			IP: net.ParseIP(bind),
+		}
+	}
 	dialer = &NetDialer{
 		DNS: dns,
-		UDP: &net.Dialer{
-			Timeout: 5 * time.Second,
-		},
-		TCP: &net.Dialer{
-			Timeout: 5 * time.Second,
-		},
+		UDP: udp,
+		TCP: tcp,
 	}
 	return
 }
@@ -121,6 +135,9 @@ func (n *NetDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 		switch u.Scheme {
 		case "dns":
 			raw, err = n.UDP.Dial("udp", n.DNS)
+			// if err == nil {
+			// 	raw = NewCountConn(raw, &n.udpRead, &n.udpWrite)
+			// }
 		case "udp":
 			raw, err = n.UDP.Dial("udp", u.Host)
 		case "tcp":
@@ -506,9 +523,13 @@ func (e *EchoDialer) Dial(network, address string) (c net.Conn, err error) {
 }
 
 const (
-	MessageHeadConn  = 10
-	MessageHeadBack  = 20
-	MessageHeadData  = 30
+	//MessageHeadConn is message header to start conenct
+	MessageHeadConn = 10
+	//MessageHeadBack is message header to connect back
+	MessageHeadBack = 20
+	//MessageHeadData is message header to transfer data
+	MessageHeadData = 30
+	//MessageHeadClose is message header to connection close
 	MessageHeadClose = 40
 )
 
@@ -521,6 +542,7 @@ type MessageConn struct {
 	remote     string
 	connected  chan string
 	readQueued chan []byte
+	reader     *bufio.Reader
 	closed     bool
 	lck        sync.RWMutex
 }
@@ -535,10 +557,16 @@ func NewMessageConn(dialer *MessageDialer, remote string) (conn *MessageConn) {
 		readQueued: make(chan []byte, 1024),
 		lck:        sync.RWMutex{},
 	}
+	conn.reader = bufio.NewReaderSize(ReaderF(conn.rawRead), dialer.bufferSize)
 	return
 }
 
 func (m *MessageConn) Read(p []byte) (n int, err error) {
+	n, err = m.reader.Read(p)
+	return
+}
+
+func (m *MessageConn) rawRead(p []byte) (n int, err error) {
 	m.lck.RLock()
 	if m.closed {
 		m.lck.RUnlock()
@@ -552,7 +580,7 @@ func (m *MessageConn) Read(p []byte) (n int, err error) {
 		return
 	}
 	if len(data) > len(p) {
-		err = fmt.Errorf("buffer is too small")
+		err = fmt.Errorf("MessageConn.Read buffer is too small for %v, expect %v", len(p), len(data))
 		return
 	}
 	n = copy(p, data)
@@ -567,7 +595,7 @@ func (m *MessageConn) Write(p []byte) (n int, err error) {
 		return
 	}
 	m.lck.RUnlock()
-	data := make([]byte, len(m.dialer.Header)+8+len(p))
+	data := make([]byte, len(m.dialer.Header)+9+len(p))
 	copy(data, m.dialer.Header)
 	binary.BigEndian.PutUint64(data[len(m.dialer.Header):], m.cid)
 	data[len(m.dialer.Header)+8] = MessageHeadData
@@ -607,14 +635,22 @@ func (m *MessageConn) Close() (err error) {
 
 func (m *MessageConn) closeOnly() (err error) {
 	m.lck.Lock()
-	defer m.lck.Unlock()
 	if m.closed {
 		err = fmt.Errorf("closed")
+		m.lck.Unlock()
 		return
 	}
 	m.closed = true
+	m.lck.Unlock()
 	close(m.readQueued)
 	close(m.connected)
+	data := make([]byte, len(m.dialer.Header)+9)
+	copy(data, m.dialer.Header)
+	binary.BigEndian.PutUint64(data[len(m.dialer.Header):], m.cid)
+	data[len(m.dialer.Header)+8] = MessageHeadClose
+	m.dialer.Message <- data
+	// fmt.Printf("MessageConn the %v connection is closed\n", m.cid)
+	DebugLog("MessageConn the %v connection is closed", m.cid)
 	return
 }
 
@@ -654,27 +690,30 @@ func (m *MessageConn) String() string {
 
 //MessageDialer is dialer impl for message
 type MessageDialer struct {
-	Header   []byte
-	Message  chan []byte
-	conns    map[uint64]*MessageConn
-	connsLck sync.RWMutex
-	closed   bool
+	Header     []byte
+	Message    chan []byte
+	conns      map[uint64]*MessageConn
+	connsLck   sync.RWMutex
+	closed     bool
+	reader     *bufio.Reader
+	bufferSize int
 }
 
 //NewMessageDialer will create new MessageDialer
-func NewMessageDialer(header []byte) (dialer *MessageDialer) {
+func NewMessageDialer(header []byte, bufferSize int) (dialer *MessageDialer) {
 	dialer = &MessageDialer{
-		Header:   header,
-		Message:  make(chan []byte, 1024),
-		conns:    map[uint64]*MessageConn{},
-		connsLck: sync.RWMutex{},
+		Header:     header,
+		Message:    make(chan []byte, 1024*100),
+		conns:      map[uint64]*MessageConn{},
+		connsLck:   sync.RWMutex{},
+		bufferSize: bufferSize,
 	}
+	dialer.reader = bufio.NewReaderSize(ReaderF(dialer.rawRead), bufferSize)
 	return
 }
 
 //Dial dail one raw connection
 func (m *MessageDialer) Dial(network, address string) (c net.Conn, err error) {
-	InfoLog("MessageDialer dial to %v://%v\n", network, address)
 	m.connsLck.Lock()
 	if m.closed {
 		err = fmt.Errorf("closed")
@@ -684,9 +723,13 @@ func (m *MessageDialer) Dial(network, address string) (c net.Conn, err error) {
 	conn := NewMessageConn(m, network+"://"+address)
 	m.conns[conn.cid] = conn
 	m.connsLck.Unlock()
+	InfoLog("MessageDialer start connect to %v://%v by id %v\n", network, address, conn.cid)
 	err = conn.Connect()
 	if err == nil {
 		c = conn
+		InfoLog("MessageDialer connect to %v://%v by id %v success\n", network, address, conn.cid)
+	} else {
+		InfoLog("MessageDialer connect to %v://%v by id %v fail with %v\n", network, address, conn.cid, err)
 	}
 	return
 }
@@ -695,12 +738,13 @@ func (m *MessageDialer) closeConn(c *MessageConn) {
 	m.connsLck.Lock()
 	defer m.connsLck.Unlock()
 	delete(m.conns, c.cid)
+	DebugLog("MessageDialer remove connection by id %v", c.cid)
 }
 
 //Deliver deliver message to connection
 func (m *MessageDialer) Write(b []byte) (n int, err error) {
 	head := len(m.Header)
-	if len(b) < head+8 {
+	if len(b) < head+9 {
 		err = fmt.Errorf("invalid data")
 		return
 	}
@@ -714,13 +758,22 @@ func (m *MessageDialer) Write(b []byte) (n int, err error) {
 	conn, ok := m.conns[cid]
 	m.connsLck.RUnlock()
 	if !ok {
-		err = fmt.Errorf("connection not exist")
+		err = fmt.Errorf("connection not exist by %v", cid)
 		return
 	}
 	cmd := b[head+8]
 	switch cmd {
 	case MessageHeadData:
-		conn.readQueued <- b[head+9:]
+		buf := make([]byte, len(b)-head-9)
+		copy(buf, b[head+9:])
+		conn.lck.RLock()
+		if conn.closed {
+			err = fmt.Errorf("connection is closed by %v", cid)
+			conn.lck.RUnlock()
+			return
+		}
+		conn.readQueued <- buf
+		conn.lck.RUnlock()
 	case MessageHeadBack:
 		conn.connected <- string(b[head+9:])
 	case MessageHeadClose:
@@ -733,6 +786,42 @@ func (m *MessageDialer) Write(b []byte) (n int, err error) {
 }
 
 func (m *MessageDialer) Read(b []byte) (n int, err error) {
+	n, err = m.rawRead(b)
+	return
+}
+
+//StartEcho will start echo on message dialer
+func (m *MessageDialer) StartEcho(bufferSize int) {
+	go m.processEcho(bufferSize)
+}
+
+func (m *MessageDialer) processEcho(bufferSize int) (err error) {
+	InfoLog("MessageDialer echo processor is starting")
+	buf := make([]byte, bufferSize)
+	for {
+		n, err := m.Read(buf)
+		if err != nil {
+			break
+		}
+		cid := binary.BigEndian.Uint64(buf[len(m.Header):])
+		switch buf[9] {
+		case MessageHeadConn:
+			remote := string(buf[10:n])
+			InfoLog("MessageDialer echo dial to %v with id %v", remote, cid)
+			buf[9] = MessageHeadBack
+			m.Write(buf[0:10])
+		case MessageHeadData:
+			InfoLog("MessageDialer echo transfer %v data on id %v", n-10, cid)
+			m.Write(buf[0:n])
+		case MessageHeadClose:
+			InfoLog("MessageDialer echo connection %v is closed", cid)
+		}
+	}
+	InfoLog("MessageDialer echo processor is stopped by %v", err)
+	return
+}
+
+func (m *MessageDialer) rawRead(b []byte) (n int, err error) {
 	m.connsLck.RLock()
 	if m.closed {
 		err = fmt.Errorf("closed")
@@ -746,7 +835,7 @@ func (m *MessageDialer) Read(b []byte) (n int, err error) {
 		return
 	}
 	if len(data) > len(b) {
-		err = fmt.Errorf("buffer is too small")
+		err = fmt.Errorf("MessageDialer.Read buffer is too small for %v, expect %v", len(b), len(data))
 		return
 	}
 	n = copy(b, data)
@@ -763,6 +852,21 @@ func (m *MessageDialer) Close() (err error) {
 		delete(m.conns, cid)
 	}
 	close(m.Message)
+	return
+}
+
+//State will return message dialer info
+func (m *MessageDialer) State() (state interface{}) {
+	conns := map[string]interface{}{}
+	m.connsLck.RLock()
+	for _, conn := range m.conns {
+		conns[fmt.Sprintf("%v", conn.cid)] = map[string]interface{}{
+			"cid":    conn.cid,
+			"remote": conn.remote,
+		}
+	}
+	m.connsLck.RUnlock()
+	state = conns
 	return
 }
 
@@ -807,5 +911,131 @@ func (h *HeadDistWriteCloser) Close() (err error) {
 		w.Close()
 	}
 	h.lck.RUnlock()
+	return
+}
+
+//PrintConn is net.Conn to print the transfter data
+type PrintConn struct {
+	io.ReadWriteCloser
+}
+
+//NewPrintConn will create new PrintConn
+func NewPrintConn(base io.ReadWriteCloser) (conn *PrintConn) {
+	conn = &PrintConn{ReadWriteCloser: base}
+	return
+}
+
+func (p *PrintConn) Read(b []byte) (n int, err error) {
+	n, err = p.ReadWriteCloser.Read(b)
+	if err == nil {
+		fmt.Printf("%v Read %v % 02x\n", p.ReadWriteCloser, n, b[:n])
+	}
+	return
+}
+
+func (p *PrintConn) Write(b []byte) (n int, err error) {
+	n, err = p.ReadWriteCloser.Write(b)
+	if err == nil {
+		fmt.Printf("%v Write %v % 02x\n", p.ReadWriteCloser, n, b[:n])
+	}
+	return
+}
+
+// LocalAddr returns the local network address.
+func (p *PrintConn) LocalAddr() net.Addr {
+	if conn, ok := p.ReadWriteCloser.(net.Conn); ok {
+		return conn.LocalAddr()
+	}
+	return p
+}
+
+// RemoteAddr returns the remote network address.
+func (p *PrintConn) RemoteAddr() net.Addr {
+	if conn, ok := p.ReadWriteCloser.(net.Conn); ok {
+		return conn.RemoteAddr()
+	}
+	return p
+}
+
+// SetDeadline for net.Conn
+func (p *PrintConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+// SetReadDeadline for net.Conn
+func (p *PrintConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline for net.Conn
+func (p *PrintConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+//Network impl net.Addr
+func (p *PrintConn) Network() string {
+	return "message"
+}
+
+func (p *PrintConn) String() string {
+	return fmt.Sprintf("%v", p.ReadWriteCloser)
+}
+
+//Close will close base
+func (p *PrintConn) Close() (err error) {
+	err = p.ReadWriteCloser.Close()
+	if err == nil {
+		fmt.Printf("%v Close\n", p.ReadWriteCloser)
+	}
+	return
+}
+
+type PrintDialer struct {
+	Dialer
+}
+
+func NewPrintDialer(base Dialer) (dialer *PrintDialer) {
+	dialer = &PrintDialer{
+		Dialer: base,
+	}
+	return
+}
+
+func (m *PrintDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
+	base, err := m.Dialer.Dial(remote)
+	if err == nil {
+		raw = NewPrintConn(base)
+	}
+	return
+}
+
+type CountConn struct {
+	io.ReadWriteCloser
+	read  *uint64
+	write *uint64
+}
+
+func NewCountConn(base io.ReadWriteCloser, read, write *uint64) (conn *CountConn) {
+	conn = &CountConn{
+		ReadWriteCloser: base,
+		read:            read,
+		write:           write,
+	}
+	return
+}
+
+func (c *CountConn) Write(p []byte) (n int, err error) {
+	n, err = c.ReadWriteCloser.Write(p)
+	if err == nil {
+		atomic.AddUint64(c.write, uint64(n))
+	}
+	return
+}
+
+func (c *CountConn) Read(p []byte) (n int, err error) {
+	n, err = c.ReadWriteCloser.Read(p)
+	if err == nil {
+		atomic.AddUint64(c.read, uint64(n))
+	}
 	return
 }

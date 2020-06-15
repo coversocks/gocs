@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -68,6 +69,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	fmt.Printf("mtu--->%v\n", mtu)
 
 	fd, err := tun.Open(tunName)
 	if err != nil {

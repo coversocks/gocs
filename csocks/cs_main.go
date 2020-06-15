@@ -8,7 +8,16 @@ import (
 
 	"github.com/coversocks/gocs"
 	"github.com/coversocks/gocs/core"
+
+	"net/http"
+	_ "net/http/pprof"
 )
+
+func init() {
+	go func() {
+		log.Println(http.ListenAndServe(":5060", nil))
+	}()
+}
 
 var argConf string
 var argRunServer bool

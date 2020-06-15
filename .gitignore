@@ -13,3 +13,5 @@ netstack/netcsock/test.ovpn
 netstack/netcsock/csocks.json
 *.aar
 *.jar
+netstack/*.pcap
+test/test

@@ -9,9 +9,9 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${fileDirname}",
+            "program": "/Users/vty/go/src/github.com/coversocks/gocs/netstack/netdev/netdev.go",
             "env": {},
-            "args": ["tap2"]
+            "args": ["udp"]
         }
     ]
 }

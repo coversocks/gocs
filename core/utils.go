@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -277,3 +278,216 @@ func Now() int64 {
 type Statable interface {
 	State() interface{}
 }
+
+//ReaderF is wrapper for io.Reader
+type ReaderF func(p []byte) (n int, err error)
+
+func (r ReaderF) Read(p []byte) (n int, err error) {
+	n, err = r(p)
+	return
+}
+
+type WriterF func(p []byte) (n int, err error)
+
+func (w WriterF) Write(p []byte) (n int, err error) {
+	n, err = w(p)
+	return
+}
+
+type CloserF func() (err error)
+
+func (c CloserF) Close() (err error) {
+	err = c()
+	return
+}
+
+//ChannelRWC is an io.ReadWriteCloser impl by channel
+type ChannelRWC struct {
+	Async       bool
+	Retain      bool
+	err         error
+	closeLocker sync.RWMutex
+	readQueued  chan []byte
+	writeQueued chan []byte
+}
+
+//NewChannelRWC will return new ChannelRWC
+func NewChannelRWC(async, retain bool, bufferSize int) (rwc *ChannelRWC) {
+	rwc = &ChannelRWC{
+		Async:       async,
+		Retain:      retain,
+		closeLocker: sync.RWMutex{},
+		readQueued:  make(chan []byte, bufferSize),
+		writeQueued: make(chan []byte, bufferSize),
+	}
+	return
+}
+
+//Pull will read data from write queue
+func (c *ChannelRWC) Pull() (data []byte, err error) {
+	c.closeLocker.RLock()
+	if err != nil {
+		c.closeLocker.RUnlock()
+		err = c.err
+		return
+	}
+	c.closeLocker.RUnlock()
+	if c.Async {
+		select {
+		case data = <-c.writeQueued:
+		default:
+		}
+	} else {
+		data = <-c.writeQueued
+	}
+	if len(data) < 1 {
+		err = c.err
+	}
+	return
+}
+
+//Push will send data to read queue
+func (c *ChannelRWC) Push(data []byte) (err error) {
+	c.closeLocker.RLock()
+	if err != nil {
+		c.closeLocker.RUnlock()
+		err = c.err
+		return
+	}
+	c.closeLocker.RUnlock()
+	buf := data
+	if c.Retain {
+		buf = make([]byte, len(data))
+		copy(buf, data)
+	}
+	c.readQueued <- buf
+	return
+}
+
+func (c *ChannelRWC) Read(p []byte) (n int, err error) {
+	c.closeLocker.RLock()
+	if err != nil {
+		c.closeLocker.RUnlock()
+		err = c.err
+		return
+	}
+	c.closeLocker.RUnlock()
+	data := <-c.readQueued
+	if len(data) < 1 {
+		err = c.err
+		return
+	}
+	if len(p) < len(data) {
+		err = fmt.Errorf("buffer to small expect %v, but %v", len(data), len(p))
+		return
+	}
+	n = copy(p, data)
+	return
+}
+
+func (c *ChannelRWC) Write(p []byte) (n int, err error) {
+	c.closeLocker.RLock()
+	if err != nil {
+		c.closeLocker.RUnlock()
+		err = c.err
+		return
+	}
+	c.closeLocker.RUnlock()
+	buf := p
+	if c.Retain {
+		buf = make([]byte, len(p))
+		copy(buf, p)
+	}
+	c.writeQueued <- buf
+	n = len(buf)
+	return
+}
+
+//Close will close the channel
+func (c *ChannelRWC) Close() (err error) {
+	c.closeLocker.RLock()
+	if c.err != nil {
+		c.closeLocker.RUnlock()
+		err = c.err
+		return
+	}
+	c.err = fmt.Errorf("closed")
+	close(c.readQueued)
+	close(c.writeQueued)
+	c.closeLocker.RUnlock()
+	return
+}
+
+// type HashConn struct {
+// 	net.Conn
+// 	Show          bool
+// 	name          string
+// 	readHasher    hash.Hash
+// 	writeHash     hash.Hash
+// 	readOut       io.WriteCloser
+// 	writeOut      io.WriteCloser
+// 	readc, writec uint64
+// }
+
+// func NewHashConn(base net.Conn, show bool, name string) (conn *HashConn) {
+// 	conn = &HashConn{
+// 		Conn:       base,
+// 		Show:       show,
+// 		name:       name,
+// 		readHasher: sha1.New(),
+// 		writeHash:  sha1.New(),
+// 	}
+// 	if conn.Show {
+// 		var err error
+// 		conn.readOut, err = os.OpenFile("/data/data/com.github.coversocks/files/"+name+"_r.dat", os.O_CREATE|os.O_WRONLY, os.ModePerm)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		conn.writeOut, err = os.OpenFile("/data/data/com.github.coversocks/files/"+name+"_w.dat", os.O_CREATE|os.O_WRONLY, os.ModePerm)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 	}
+// 	return
+// }
+
+// func (h *HashConn) Read(p []byte) (n int, err error) {
+// 	n, err = h.Conn.Read(p)
+// 	if h.Show && err == nil {
+// 		h.readHasher.Write(p[0:n])
+// 	}
+// 	if h.readOut != nil {
+// 		h.readOut.Write(p[0:n])
+// 	}
+// 	atomic.AddUint64(&h.readc, uint64(n))
+// 	return
+// }
+
+// func (h *HashConn) Write(p []byte) (n int, err error) {
+// 	n, err = h.Conn.Write(p)
+// 	if h.Show && err == nil {
+// 		h.writeHash.Write(p[0:n])
+// 	}
+// 	if h.writeOut != nil {
+// 		h.writeOut.Write(p[0:n])
+// 	}
+// 	atomic.AddUint64(&h.writec, uint64(n))
+// 	return
+// }
+
+// //Close will close base Conn
+// func (h *HashConn) Close() (err error) {
+// 	err = h.Conn.Close()
+// 	if h.Show {
+// 		fmt.Printf("HashConn(%v) read(%v) hash:%x,write(%v) hash:%x\n", h.name, h.readc, h.readHasher.Sum(nil), h.writec, h.writeHash.Sum(nil))
+// 	}
+// 	if h.readOut != nil {
+// 		h.readOut.Close()
+// 		fmt.Printf("read out is closed %v\n", h.readOut)
+// 	}
+// 	if h.writeOut != nil {
+// 		h.writeOut.Close()
+// 		fmt.Printf("write out is closed %v\n", h.writeOut)
+// 	}
+// 	return
+// }

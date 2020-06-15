@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"regexp"
@@ -35,11 +36,19 @@ func NewGFW() (gfw *GFW) {
 	return
 }
 
-//Add list
-func (g *GFW) Add(list, target string) {
+//Set list
+func (g *GFW) Set(list, target string) {
 	g.lck.Lock()
 	defer g.lck.Unlock()
 	g.list[list] = target
+}
+
+//Get list
+func (g *GFW) Get(list string) (target string) {
+	g.lck.Lock()
+	defer g.lck.Unlock()
+	target = g.list[list]
+	return
 }
 
 //IsProxy return true, if domain target is dns://proxy
@@ -75,7 +84,7 @@ func (g *GFW) Find(domain string) (target string) {
 }
 
 func (g *GFW) check(parts ...string) (target string) {
-	ptxt := fmt.Sprintf("(?m)^[\\|\\.\\@]*(http://)?(https://)?%v$", strings.Join(parts, "\\."))
+	ptxt := fmt.Sprintf("(?m)^[^\\@]*[\\|\\.]*(http://)?(https://)?%v$", strings.Join(parts, "\\."))
 	pattern, err := regexp.Compile(ptxt)
 	if err == nil {
 		for key, val := range g.list {
@@ -99,11 +108,12 @@ type Conn struct {
 	base       io.ReadWriteCloser
 	readQueued chan []byte
 	closed     bool
+	reader     io.Reader
 	lck        sync.RWMutex
 }
 
 //NewConn will create new Conn
-func NewConn(p *Processor, key string, base io.ReadWriteCloser) (conn *Conn) {
+func NewConn(p *Processor, key string, base io.ReadWriteCloser, bufferSize int) (conn *Conn) {
 	conn = &Conn{
 		p:          p,
 		key:        key,
@@ -111,10 +121,20 @@ func NewConn(p *Processor, key string, base io.ReadWriteCloser) (conn *Conn) {
 		readQueued: make(chan []byte, 1024),
 		lck:        sync.RWMutex{},
 	}
+	if bufferSize > 0 {
+		conn.reader = bufio.NewReaderSize(core.ReaderF(conn.rawRead), bufferSize)
+	} else {
+		conn.reader = base
+	}
 	return
 }
 
 func (c *Conn) Read(p []byte) (n int, err error) {
+	n, err = c.reader.Read(p)
+	return
+}
+
+func (c *Conn) rawRead(p []byte) (n int, err error) {
 	c.lck.RLock()
 	if c.closed {
 		c.lck.RUnlock()
@@ -127,7 +147,7 @@ func (c *Conn) Read(p []byte) (n int, err error) {
 		return
 	}
 	if len(data) > len(p) {
-		err = fmt.Errorf("buffer is too small")
+		err = fmt.Errorf("Conn.Read buffer is too small for %v, expect %v", len(p), len(data))
 		return
 	}
 	n = copy(p, data)
@@ -166,19 +186,23 @@ func (c *Conn) String() string {
 
 //Processor impl to core.Processor for process  connection
 type Processor struct {
-	conns    map[string]*Conn
-	connsLck sync.RWMutex
-	Next     core.Processor
-	Target   func(domain string) string
+	Async      bool
+	bufferSize int
+	conns      map[string]*Conn
+	connsLck   sync.RWMutex
+	Next       core.Processor
+	Target     func(domain string) string
 }
 
 //NewProcessor will create new Processor
-func NewProcessor(next core.Processor, target func(domain string) string) (p *Processor) {
+func NewProcessor(async bool, bufferSize int, next core.Processor, target func(domain string) string) (p *Processor) {
 	p = &Processor{
-		conns:    map[string]*Conn{},
-		connsLck: sync.RWMutex{},
-		Next:     next,
-		Target:   target,
+		Async:      async,
+		bufferSize: bufferSize,
+		conns:      map[string]*Conn{},
+		connsLck:   sync.RWMutex{},
+		Next:       next,
+		Target:     target,
 	}
 	return
 }
@@ -186,7 +210,11 @@ func NewProcessor(next core.Processor, target func(domain string) string) (p *Pr
 //ProcConn will process connection
 func (p *Processor) ProcConn(r io.ReadWriteCloser, target string) (err error) {
 	core.DebugLog("Processor proc for %v", r)
-	go p.proc(r)
+	if p.Async {
+		go p.proc(r)
+	} else {
+		p.proc(r)
+	}
 	return
 }
 
@@ -201,37 +229,67 @@ func (p *Processor) proc(r io.ReadWriteCloser) {
 	var n int
 	var err error
 	for {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 32*1024)
 		n, err = r.Read(buf)
 		if err != nil {
+			core.InfoLog("Processor(DNS) connection %v read fail with %v", r, err)
 			break
 		}
 		msg := new(dns.Msg)
 		err = msg.Unpack(buf[0:n])
 		if err != nil {
-			break
+			core.WarnLog("Processor(DNS) unpack dns package fail with %v by %v", err, buf[0:n])
+			continue
 		}
 		var target = p.Target(msg.Question[0].Name)
 		var key = fmt.Sprintf("%p-%v", r, target)
-		p.connsLck.RLock()
+		p.connsLck.Lock()
 		conn, ok := p.conns[key]
-		p.connsLck.RUnlock()
 		if !ok {
-			conn = NewConn(p, key, r)
+			conn = NewConn(p, key, r, p.bufferSize)
+			p.conns[key] = conn
+		}
+		p.connsLck.Unlock()
+		if !ok {
 			err = p.Next.ProcConn(conn, target)
 			if err != nil {
 				//drop it
-				core.DebugLog("Processor dns runner proc %v fail with %v", r, err)
+				core.WarnLog("Processor dns runner proc %v fail with %v", r, err)
 				continue
 			}
-			p.connsLck.Lock()
-			p.conns[key] = conn
-			p.connsLck.Unlock()
 		}
 		conn.readQueued <- buf[0:n]
 	}
 	r.Close()
-	core.DebugLog("Processor dns runner is stopped for %v", r)
+	prefix := fmt.Sprintf("%p-", r)
+	closing := []*Conn{}
+	p.connsLck.Lock()
+	allc := len(p.conns)
+	for key, c := range p.conns {
+		if strings.HasPrefix(key, prefix) {
+			closing = append(closing, c)
+			delete(p.conns, key)
+		}
+	}
+	p.connsLck.Unlock()
+	core.DebugLog("Processor dns runner is stopped for %v and close %v/%v connection", r, len(closing), allc)
+	for _, c := range closing {
+		c.Close()
+	}
+}
+
+//State will return the state
+func (p *Processor) State() (state interface{}) {
+	conns := map[string]interface{}{}
+	p.connsLck.Lock()
+	for key, c := range p.conns {
+		conns[key] = map[string]interface{}{
+			"base": fmt.Sprintf("%v", c.base),
+		}
+	}
+	p.connsLck.Unlock()
+	state = conns
+	return
 }
 
 func (p *Processor) String() string {
@@ -260,11 +318,15 @@ func (r *RecordConn) Read(p []byte) (n int, err error) {
 
 func (r *RecordConn) Write(p []byte) (n int, err error) {
 	msg := new(dns.Msg)
-	if xerr := msg.Unpack(p); xerr == nil && len(msg.Answer) > 0 {
+	xerr := msg.Unpack(p)
+	if xerr != nil {
+		core.WarnLog("Record unpack dns fail with %v by %v", xerr, p)
+	}
+	if xerr == nil && len(msg.Answer) > 0 {
 		for _, answer := range msg.Answer {
 			if a, ok := answer.(*dns.A); ok {
 				core.DebugLog("Record recoding %v->%v", a.Hdr.Name, a.A)
-				r.p.Record(a.A.String(), a.Hdr.Name)
+				r.p.Record(a.A.String(), msg.Question[0].Name)
 			}
 		}
 	}
@@ -334,6 +396,18 @@ func (r *RecordProcessor) Clear() {
 func (r *RecordProcessor) ProcConn(base io.ReadWriteCloser, target string) (err error) {
 	core.DebugLog("RecordProcessor proc %v", base)
 	err = r.Next.ProcConn(NewRecordConn(r, base), target)
+	return
+}
+
+//State will return the state
+func (r *RecordProcessor) State() (state interface{}) {
+	all := map[string]interface{}{}
+	r.allLck.RLock()
+	for k, v := range r.allIP {
+		all[k] = v
+	}
+	r.allLck.RUnlock()
+	state = all
 	return
 }
 
