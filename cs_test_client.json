@@ -11,8 +11,9 @@
         }
     ],
     "socks_addr": "0.0.0.0:11105",
-    "socks_pac": "auto",
+    "socks_auto_addr": "0.0.0.0:11106",
     "http_addr": "0.0.0.0:11103",
+    "http_auto_addr": "0.0.0.0:11104",
     "manager_addr": "0.0.0.0:11101",
     "mode": "global",
     "log": 0,

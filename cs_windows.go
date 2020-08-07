@@ -1,6 +1,7 @@
 package gocs
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -32,20 +33,24 @@ func changeProxyModeNative(args ...string) (message string, err error) {
 	return
 }
 
-var privoxyRunner *exec.Cmd
 var privoxyPath = ExecDir + "\\privoxy.exe"
 
 func runPrivoxyNative(conf string) (err error) {
-	privoxyRunner = exec.Command(privoxyPath, conf)
-	privoxyRunner.SysProcAttr = &syscall.SysProcAttr{
+	runner := exec.Command(privoxyPath, conf)
+	runner.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow: true,
 	}
-	privoxyRunner.Stderr = os.Stdout
-	privoxyRunner.Stdout = os.Stderr
-	err = privoxyRunner.Start()
+	runner.Stderr = os.Stdout
+	runner.Stdout = os.Stderr
+	err = runner.Start()
 	if err == nil {
-		err = privoxyRunner.Wait()
+		privoxyLock.Lock()
+		privoxyRunner[fmt.Sprintf("%v", runner)] = runner
+		privoxyLock.Unlock()
+		err = runner.Wait()
+		privoxyLock.Lock()
+		delete(privoxyRunner, fmt.Sprintf("%v", runner))
+		privoxyLock.Unlock()
 	}
-	privoxyRunner = nil
 	return
 }

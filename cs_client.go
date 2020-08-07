@@ -21,6 +21,7 @@ import (
 // var clientConfDir string
 var client *Client
 var proxyServer *core.SocksProxy
+var proxyAutoServer *core.SocksProxy
 var managerServer *http.Server
 var managerListener net.Listener
 
@@ -75,14 +76,15 @@ func (c *ClientServerDialer) String() string {
 
 //ClientConf is pojo for dark socks client configure
 type ClientConf struct {
-	Servers     []*ClientServerConf `json:"servers"`
-	SocksAddr   string              `json:"socks_addr"`
-	SocksPAC    string              `json:"socks_pac"`
-	HTTPAddr    string              `json:"http_addr"`
-	ManagerAddr string              `json:"manager_addr"`
-	Mode        string              `json:"mode"`
-	LogLevel    int                 `json:"log"`
-	WorkDir     string              `json:"work_dir"`
+	Servers       []*ClientServerConf `json:"servers"`
+	SocksAddr     string              `json:"socks_addr"`
+	SocksAutoAddr string              `json:"socks_auto_addr"`
+	HTTPAddr      string              `json:"http_addr"`
+	HTTPAutoAddr  string              `json:"http_auto_addr"`
+	ManagerAddr   string              `json:"manager_addr"`
+	Mode          string              `json:"mode"`
+	LogLevel      int                 `json:"log"`
+	WorkDir       string              `json:"work_dir"`
 }
 
 //Client is dialer by ClientConf
@@ -288,12 +290,14 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 	directProcessor := core.NewProcConnDialer(false, core.NewNetDialer("", ""))
 	pacProcessor := core.NewPACProcessor(client, directProcessor)
 	pacProcessor.Check = gfw.IsProxy
-	pacProcessor.Mode = conf.SocksPAC
-	if len(pacProcessor.Mode) < 1 {
-		pacProcessor.Mode = "global"
-	}
+	pacProcessor.Mode = "global"
 	proxyServer = core.NewSocksProxy()
 	proxyServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
+		err = client.ProcConn(raw, "tcp://"+target)
+		return
+	})
+	proxyAutoServer = core.NewSocksProxy()
+	proxyAutoServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
 		err = pacProcessor.ProcConn(raw, "tcp://"+target)
 		return
 	})
@@ -318,6 +322,13 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 		core.ErrorLog("Client start proxy server fail with %v", err)
 		return
 	}
+	if len(conf.SocksAutoAddr) > 0 {
+		err = proxyAutoServer.Listen(conf.SocksAutoAddr)
+		if err != nil {
+			core.ErrorLog("Client start auto proxy server fail with %v", err)
+			return
+		}
+	}
 	core.InfoLog("Client start socks server on %v with mode %v", conf.SocksAddr, pacProcessor.Mode)
 	changeProxyMode(conf.Mode)
 	// writeRuntimeVar()
@@ -335,10 +346,20 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 		wait.Add(1)
 		proxyServer.HTTPUpstream = conf.HTTPAddr
 		go func() {
-			xerr := runPrivoxy(workDir, conf.HTTPAddr)
+			xerr := runPrivoxy(proxyServer, workDir, conf.HTTPAddr, "privoxy.conf")
 			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
 			wait.Done()
 		}()
+	}
+	if len(conf.HTTPAutoAddr) > 0 {
+		wait.Add(1)
+		proxyAutoServer.HTTPUpstream = conf.HTTPAutoAddr
+		go func() {
+			xerr := runPrivoxy(proxyAutoServer, workDir, conf.HTTPAutoAddr, "privoxy_auto.conf")
+			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAutoAddr, xerr)
+			wait.Done()
+		}()
+		go proxyAutoServer.Run()
 	}
 	proxyServer.Run()
 	core.InfoLog("Client all listener is stopped")
@@ -356,9 +377,13 @@ func StopClient() {
 	if managerServer != nil {
 		managerServer.Close()
 	}
-	if privoxyRunner != nil && privoxyRunner.Process != nil {
-		privoxyRunner.Process.Kill()
+	privoxyLock.RLock()
+	for _, runner := range privoxyRunner {
+		if runner != nil && runner.Process != nil {
+			runner.Process.Kill()
+		}
 	}
+	privoxyLock.RUnlock()
 	if client != nil {
 		client.Close()
 	}
@@ -434,11 +459,11 @@ func writePrivoxyConf(confFile, httpAddr, socksAddr string) (err error) {
 	return
 }
 
-func runPrivoxy(workDir, httpAddr string) (err error) {
-	proxyServerParts := strings.SplitN(proxyServer.Addr().String(), ":", -1)
+func runPrivoxy(proxy *core.SocksProxy, workDir, httpAddr, conf string) (err error) {
+	proxyServerParts := strings.SplitN(proxy.Addr().String(), ":", -1)
 	socksAddr := fmt.Sprintf("127.0.0.1:%v", proxyServerParts[len(proxyServerParts)-1])
 	core.InfoLog("Client start privoxy by listening http proxy on %v and forwarding to %v", httpAddr, socksAddr)
-	confFile := filepath.Join(workDir, "privoxy.conf")
+	confFile := filepath.Join(workDir, conf)
 	err = writePrivoxyConf(confFile, httpAddr, socksAddr)
 	if err != nil {
 		core.WarnLog("Client save privoxy config to %v fail with %v", confFile, err)

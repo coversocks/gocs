@@ -1,12 +1,13 @@
 package gocs
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
 
-var networksetupPath = filepath.Join(execDir(), "networksetup-linux.sh")
+var networksetupPath = ExecDir + "/networksetup-linux.sh"
 
 func changeProxyModeNative(args ...string) (message string, err error) {
 	out, err := exec.Command(networksetupPath, args...).CombinedOutput()
@@ -14,17 +15,21 @@ func changeProxyModeNative(args ...string) (message string, err error) {
 	return
 }
 
-var privoxyRunner *exec.Cmd
 var privoxyPath = filepath.Join(execDir(), "privoxy")
 
 func runPrivoxyNative(conf string) (err error) {
-	privoxyRunner = exec.Command(privoxyPath, "--no-daemon", conf)
-	privoxyRunner.Stderr = os.Stdout
-	privoxyRunner.Stdout = os.Stderr
-	err = privoxyRunner.Start()
+	runner := exec.Command(privoxyPath, "--no-daemon", conf)
+	runner.Stderr = os.Stdout
+	runner.Stdout = os.Stderr
+	err = runner.Start()
 	if err == nil {
-		err = privoxyRunner.Wait()
+		privoxyLock.Lock()
+		privoxyRunner[fmt.Sprintf("%v", runner)] = runner
+		privoxyLock.Unlock()
+		err = runner.Wait()
+		privoxyLock.Lock()
+		delete(privoxyRunner, fmt.Sprintf("%v", runner))
+		privoxyLock.Unlock()
 	}
-	privoxyRunner = nil
 	return
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // func workDir_() (dir string) {
@@ -52,3 +53,6 @@ func parsePortAddr(prefix, addr, subffix string) (addrs []string, err error) {
 	}
 	return
 }
+
+var privoxyRunner = map[string]*exec.Cmd{}
+var privoxyLock = sync.RWMutex{}
