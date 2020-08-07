@@ -1,1 +1,1 @@
-openssl req -x509 -nodes -days 365 -newkey rsa:4096 -keyout cscert.key -out cscert.crt -subj "/C=TG/ST=TG/L=TG/O=Dark Socket/OU=Cover Socket/CN=xxxx"
+openssl req -x509 -nodes -days 365 -newkey rsa:8192 -keyout cscert.key -out cscert.crt -subj "/C=TG/ST=TG/L=TG/O=Dark Socket/OU=Cover Socket/CN=xxxx"

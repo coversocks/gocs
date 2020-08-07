@@ -12,12 +12,11 @@ echo "Installing Dependence"
 #########Running Test#########
 echo "Running Test"
 pkgs="\
- github.com/coversocks/gocs/core\
- github.com/coversocks/gocs/csocks\
+ github.com/coversocks/gocs\
 "
 
-if [ ! -f coversocks/cscert.crt ];then
-    ./cert.sh csocks/
+if [ ! -f ./cscert.crt ];then
+    ./cert.sh ./
 fi 
 
 echo "mode: set" > a.out

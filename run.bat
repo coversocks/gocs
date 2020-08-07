@@ -1,1 +1,1 @@
-coversocks -c -f default-client.json
+csocks -c -f default-client.json

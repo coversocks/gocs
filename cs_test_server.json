@@ -1,6 +1,6 @@
 {
-    "http_listen_addr": "",
-    "https_listen_addr": ":5200",
+    "http_listen_addr": ":11200-11201",
+    "https_listen_addr": ":11300-11301",
     "https_cert": "cscert.crt",
     "https_key": "cscert.key",
     "manager": {

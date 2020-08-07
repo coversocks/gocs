@@ -1,7 +1,6 @@
 package gocs
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,6 +76,7 @@ func (c *ClientServerDialer) String() string {
 type ClientConf struct {
 	Servers     []*ClientServerConf `json:"servers"`
 	SocksAddr   string              `json:"socks_addr"`
+	SocksPAC    string              `json:"socks_pac"`
 	HTTPAddr    string              `json:"http_addr"`
 	ManagerAddr string              `json:"manager_addr"`
 	Mode        string              `json:"mode"`
@@ -110,11 +110,11 @@ func (c *Client) Boostrap(base core.Dialer) (err error) {
 func (c *Client) ReadGfwRules() (rules []string, err error) {
 	gfwFile := filepath.Join(c.WorkDir, "gfwlist.txt")
 	userFile := filepath.Join(c.WorkDir, "user_rules.txt")
-	core.DebugLog("Client read gfw rule from %v", gfwFile)
-	rules, err = ReadGfwlist(gfwFile)
+	// core.DebugLog("Client read gfw rule from %v", gfwFile)
+	rules, err = core.ReadGfwlist(gfwFile)
 	if err == nil {
-		core.DebugLog("Client read user rule from %v", userFile)
-		userRules, _ := ReadUserRules(userFile)
+		// core.DebugLog("Client read user rule from %v", userFile)
+		userRules, _ := core.ReadUserRules(userFile)
 		rules = append(rules, userRules...)
 	}
 	return
@@ -255,11 +255,24 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 	core.InfoLog("Client using config from %v, work on %v", c, workDir)
 	client = &Client{ConfPath: c, Conf: conf, WorkDir: workDir}
 	client.Boostrap(base)
-	proxyServer = core.NewSocksProxy()
-	proxyServer.Dialer = func(target string, raw io.ReadWriteCloser) (sid uint64, err error) {
-		err = client.ProcConn(raw, "tcp://"+target)
+	rules, err := client.ReadGfwRules()
+	if err != nil {
 		return
 	}
+	gfw := core.NewGFW()
+	gfw.Set(strings.Join(rules, "\n"), core.GfwProxy)
+	directProcessor := core.NewProcConnDialer(false, core.NewNetDialer("", ""))
+	pacProcessor := core.NewPACProcessor(client, directProcessor)
+	pacProcessor.Check = gfw.IsProxy
+	pacProcessor.Mode = conf.SocksPAC
+	if len(pacProcessor.Mode) < 1 {
+		pacProcessor.Mode = "global"
+	}
+	proxyServer = core.NewSocksProxy()
+	proxyServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
+		err = pacProcessor.ProcConn(raw, "tcp://"+target)
+		return
+	})
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pac.js", client.PACH)
@@ -281,6 +294,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 		core.ErrorLog("Client start proxy server fail with %v", err)
 		return
 	}
+	core.InfoLog("Client start socks server on %v with mode %v", conf.SocksAddr, pacProcessor.Mode)
 	changeProxyMode(conf.Mode)
 	// writeRuntimeVar()
 	wait := sync.WaitGroup{}
@@ -348,44 +362,6 @@ func changeProxyMode(mode string) (message string, err error) {
 		core.WarnLog("change proxy mode to %v fail with %v, the log is\n%v\n", mode, err, message)
 	} else {
 		core.InfoLog("change proxy mode to %v is success", mode)
-	}
-	return
-}
-
-//ReadGfwlist will read and decode gfwlist file
-func ReadGfwlist(gfwFile string) (rules []string, err error) {
-	gfwRaw, err := ioutil.ReadFile(gfwFile)
-	if err != nil {
-		return
-	}
-	gfwData, err := base64.StdEncoding.DecodeString(string(gfwRaw))
-	if err != nil {
-		err = fmt.Errorf("decode gfwlist.txt fail with %v", err)
-		return
-	}
-	gfwRulesAll := strings.Split(string(gfwData), "\n")
-	for _, rule := range gfwRulesAll {
-		if strings.HasPrefix(rule, "[") || strings.HasPrefix(rule, "!") || len(strings.TrimSpace(rule)) < 1 {
-			continue
-		}
-		rules = append(rules, rule)
-	}
-	return
-}
-
-//ReadUserRules will read and decode user rules
-func ReadUserRules(gfwFile string) (rules []string, err error) {
-	gfwData, err := ioutil.ReadFile(gfwFile)
-	if err != nil {
-		return
-	}
-	gfwRulesAll := strings.Split(string(gfwData), "\n")
-	for _, rule := range gfwRulesAll {
-		rule = strings.TrimSpace(rule)
-		if strings.HasPrefix(rule, "--") || strings.HasPrefix(rule, "!") || len(strings.TrimSpace(rule)) < 1 {
-			continue
-		}
-		rules = append(rules, rule)
 	}
 	return
 }

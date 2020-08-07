@@ -166,7 +166,7 @@ func (c *CodableErr) Code() byte {
 
 func TestSocksProxy(t *testing.T) {
 	proxy := NewSocksProxy()
-	proxy.Dialer = func(uri string, raw io.ReadWriteCloser) (sid uint64, err error) {
+	proxy.Processor = ProcessorF(func(raw io.ReadWriteCloser, uri string) (err error) {
 		conn, err := net.Dial("tcp", uri)
 		if err == nil {
 			go io.Copy(conn, raw)
@@ -177,7 +177,7 @@ func TestSocksProxy(t *testing.T) {
 		}
 		fmt.Println("dial to ", uri, err)
 		return
-	}
+	})
 	go func() {
 		err := proxy.Listen(":2081")
 		if err != nil {

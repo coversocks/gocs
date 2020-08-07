@@ -9,7 +9,7 @@ import (
 //SocksProxy is an implementation of socks5 proxy
 type SocksProxy struct {
 	net.Listener
-	Dialer       func(uri string, raw io.ReadWriteCloser) (sid uint64, err error)
+	Processor    Processor
 	HTTPUpstream string
 }
 
@@ -133,7 +133,7 @@ func (s *SocksProxy) procConn(conn net.Conn) {
 	buf[8], buf[9] = 0x00, 0x00
 	_, err = conn.Write(buf[:10])
 	if err == nil {
-		_, err = s.Dialer(uri, NewStringConn(conn))
+		err = s.Processor.ProcConn(NewStringConn(conn), uri)
 	}
 }
 

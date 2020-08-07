@@ -26,6 +26,7 @@ type ServerConf struct {
 
 var serverConf string
 var serverConfDir string
+var serverDialer *core.NetDialer
 var httpServer = map[string]*http.Server{}
 var httpServerLck = sync.RWMutex{}
 
@@ -37,6 +38,13 @@ func StartServer(c string) (err error) {
 		core.ErrorLog("Server read configure from %v fail with %v", c, err)
 		return
 	}
+	serverDialer = core.NewNetDialer("", conf.DNSServer)
+	err = StartDialerServer(c, conf, serverDialer)
+	return
+}
+
+//StartDialerServer by configure path and raw dialer
+func StartDialerServer(c string, conf *ServerConf, dialer core.Dialer) (err error) {
 	serverConf = c
 	serverConfDir = filepath.Dir(serverConf)
 	core.SetLogLevel(conf.LogLevel)
@@ -45,7 +53,6 @@ func StartServer(c string) (err error) {
 		userFile, _ = filepath.Abs(filepath.Join(serverConfDir, userFile))
 	}
 	auth := core.NewJSONFileAuth(conf.Manager, userFile)
-	dialer := core.NewNetDialer("", conf.DNSServer)
 	server := core.NewServer(core.DefaultBufferSize, dialer)
 	mux := http.NewServeMux()
 	mux.Handle("/ds", websocket.Handler(func(ws *websocket.Conn) {

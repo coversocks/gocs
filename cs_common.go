@@ -6,14 +6,17 @@ import (
 	"path/filepath"
 )
 
-func workDir_() (dir string) {
-	home, _ := os.UserHomeDir()
-	dir = filepath.Join(home, ".coversocks")
-	// if _, err := os.Stat(dir); err != nil {
-	os.MkdirAll(dir, os.ModePerm)
-	// }
-	return
-}
+// func workDir_() (dir string) {
+// 	home, _ := os.UserHomeDir()
+// 	dir = filepath.Join(home, ".coversocks")
+// 	// if _, err := os.Stat(dir); err != nil {
+// 	os.MkdirAll(dir, os.ModePerm)
+// 	// }
+// 	return
+// }
+
+//ExecDir is executor directory
+var ExecDir string = execDir()
 
 func execDir() (dir string) {
 	dir, _ = exec.LookPath(os.Args[0])

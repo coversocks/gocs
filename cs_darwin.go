@@ -3,10 +3,9 @@ package gocs
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 )
 
-var networksetupPath = filepath.Join(execDir(), "networksetup-osx.sh")
+var networksetupPath = ExecDir + "/networksetup-osx.sh"
 
 func changeProxyModeNative(args ...string) (message string, err error) {
 	out, err := exec.Command(networksetupPath, args...).CombinedOutput()
@@ -15,7 +14,7 @@ func changeProxyModeNative(args ...string) (message string, err error) {
 }
 
 var privoxyRunner *exec.Cmd
-var privoxyPath = filepath.Join(execDir(), "privoxy")
+var privoxyPath = ExecDir + "/privoxy"
 
 func runPrivoxyNative(conf string) (err error) {
 	privoxyRunner = exec.Command(privoxyPath, "--no-daemon", conf)

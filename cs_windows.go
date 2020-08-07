@@ -3,15 +3,14 @@ package gocs
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"syscall"
 )
 
 func sysproxyPath() string {
-	var runner = filepath.Join(execDir(), "sysproxy.exe")
+	var runner = ExecDir + "\\sysproxy.exe"
 	if runtime.GOARCH == "amd64" {
-		runner = filepath.Join(execDir(), "sysproxy64.exe")
+		runner = ExecDir + "\\sysproxy64.exe"
 	}
 	return runner
 }
@@ -34,7 +33,7 @@ func changeProxyModeNative(args ...string) (message string, err error) {
 }
 
 var privoxyRunner *exec.Cmd
-var privoxyPath = filepath.Join(execDir(), "privoxy.exe")
+var privoxyPath = ExecDir + "\\privoxy.exe"
 
 func runPrivoxyNative(conf string) (err error) {
 	privoxyRunner = exec.Command(privoxyPath, conf)
