@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -96,8 +97,26 @@ type Client struct {
 func (c *Client) Boostrap(base core.Dialer) (err error) {
 	var dialers = []core.Dialer{}
 	for _, conf := range c.Conf.Servers {
-		if conf.Enable && len(conf.Address) > 0 {
-			dialers = append(dialers, &ClientServerDialer{Base: base, ClientServerConf: conf})
+		if !(conf.Enable && len(conf.Address) > 0) {
+			continue
+		}
+		for _, addr := range conf.Address {
+			addrs, xerr := parseConnAddr(addr)
+			if xerr != nil {
+				return xerr
+			}
+			for _, a := range addrs {
+				dialers = append(dialers, &ClientServerDialer{
+					Base: base,
+					ClientServerConf: &ClientServerConf{
+						Enable:   true,
+						Name:     conf.Name,
+						Address:  []string{a},
+						Username: conf.Username,
+						Password: conf.Password,
+					},
+				})
+			}
 		}
 	}
 	var dialer = core.NewSortedDialer(dialers...)
@@ -254,9 +273,14 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 	core.SetLogLevel(conf.LogLevel)
 	core.InfoLog("Client using config from %v, work on %v", c, workDir)
 	client = &Client{ConfPath: c, Conf: conf, WorkDir: workDir}
-	client.Boostrap(base)
+	err = client.Boostrap(base)
+	if err != nil {
+		core.ErrorLog("Client bootstrap fail with %v", err)
+		return
+	}
 	rules, err := client.ReadGfwRules()
 	if err != nil {
+		core.ErrorLog("Client read gfw rules fail with %v", err)
 		return
 	}
 	gfw := core.NewGFW()
@@ -338,6 +362,17 @@ func StopClient() {
 	if client != nil {
 		client.Close()
 	}
+}
+
+func parseConnAddr(addr string) (addrs []string, err error) {
+	reg := regexp.MustCompile(":[0-9\\,\\-]+/")
+	addrParts := reg.Split(addr, 2)
+	addrPorts := strings.Trim(reg.FindString(addr), ":/")
+	if len(addrParts) < 2 {
+		err = fmt.Errorf("invalid uri")
+		return
+	}
+	return parsePortAddr(addrParts[0]+":", addrPorts, "/"+addrParts[1])
 }
 
 func changeProxyMode(mode string) (message string, err error) {

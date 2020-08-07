@@ -1,9 +1,12 @@
 package gocs
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // func workDir_() (dir string) {
@@ -26,3 +29,26 @@ func execDir() (dir string) {
 }
 
 // var exitf = os.Exit
+
+func parsePortAddr(prefix, addr, subffix string) (addrs []string, err error) {
+	var start, end int64
+	parts := strings.Split(addr, ",")
+	for _, part := range parts {
+		ports := strings.SplitN(part, "-", 2)
+		start, err = strconv.ParseInt(ports[0], 10, 32)
+		if err != nil {
+			return
+		}
+		end = start
+		if len(ports) > 1 {
+			end, err = strconv.ParseInt(ports[1], 10, 32)
+			if err != nil {
+				return
+			}
+		}
+		for i := start; i <= end; i++ {
+			addrs = append(addrs, fmt.Sprintf("%v%v%v", prefix, i, subffix))
+		}
+	}
+	return
+}

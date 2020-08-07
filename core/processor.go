@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"reflect"
 	"sync"
 )
 
@@ -156,7 +155,7 @@ func (p *ProcConnDialer) ProcConn(raw io.ReadWriteCloser, target string) (err er
 			return
 		})
 	} else {
-		WarnLog("%v is not do throughable by %v,%v", reflect.TypeOf(conn), ok, ok && through.Throughable())
+		// WarnLog("%v is not do throughable by %v,%v", reflect.TypeOf(conn), ok, ok && through.Throughable())
 		dstA, srcA = raw, conn
 	}
 	if through, ok := raw.(ThroughReadeCloser); p.Through && ok && through.Throughable() {
@@ -174,7 +173,7 @@ func (p *ProcConnDialer) ProcConn(raw io.ReadWriteCloser, target string) (err er
 			return
 		})
 	} else {
-		WarnLog("%v is not do throughable by %v,%v", reflect.TypeOf(raw), ok, ok && through.Throughable())
+		// WarnLog("%v is not do throughable by %v,%v", reflect.TypeOf(raw), ok, ok && through.Throughable())
 		if dstA != nil {
 			dstB, srcB = conn, raw
 		} else {

@@ -3,10 +3,12 @@ package gocs
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coversocks/gocs/core"
 	"golang.org/x/net/websocket"
@@ -18,6 +20,8 @@ type ServerConf struct {
 	HTTPSListenAddr string            `json:"https_listen_addr"`
 	HTTPSCert       string            `json:"https_cert"`
 	HTTPSKey        string            `json:"https_key"`
+	HTTPSGen        int               `json:"https_gen"`
+	HTTPSLen        int               `json:"https_len"`
 	Manager         map[string]string `json:"manager"`
 	UserFile        string            `json:"user_file"`
 	LogLevel        int               `json:"log"`
@@ -109,22 +113,52 @@ func StartDialerServer(c string, conf *ServerConf, dialer core.Dialer) (err erro
 		if !filepath.IsAbs(certKey) {
 			certKey, _ = filepath.Abs(filepath.Join(serverConfDir, certKey))
 		}
+		hswait := sync.WaitGroup{}
 		wait.Add(len(addrs))
-		for _, a := range addrs {
-			go func(addr string) {
-				s := &http.Server{Addr: addr, Handler: mux}
-				httpServerLck.Lock()
-				httpServer[fmt.Sprintf("%p", s)] = s
-				httpServerLck.Unlock()
-				rerr := s.ListenAndServeTLS(certFile, certKey)
-				if rerr != nil {
-					core.ErrorLog("Server https server on %v is stopped fail with %v", addr, rerr)
-				}
-				httpServerLck.Lock()
-				delete(httpServer, fmt.Sprintf("%p", s))
-				httpServerLck.Unlock()
-				wait.Done()
-			}(a)
+		hswait.Add(len(addrs))
+		httpsStop := func() {
+			httpServerLck.Lock()
+			for _, s := range httpServer {
+				s.Close()
+			}
+			httpServerLck.Unlock()
+		}
+		httpsStart := func() {
+			for _, a := range addrs {
+				go func(addr string) {
+					s := &http.Server{Addr: addr, Handler: mux}
+					httpServerLck.Lock()
+					httpServer[fmt.Sprintf("%p", s)] = s
+					httpServerLck.Unlock()
+					rerr := s.ListenAndServeTLS(certFile, certKey)
+					if rerr != nil {
+						core.ErrorLog("Server https server on %v is stopped fail with %v", addr, rerr)
+					}
+					httpServerLck.Lock()
+					delete(httpServer, fmt.Sprintf("%p", s))
+					httpServerLck.Unlock()
+					wait.Done()
+					hswait.Done()
+				}(a)
+			}
+		}
+		httpsGen := func() {
+			for {
+				openssl := fmt.Sprintf(`openssl req -x509 -nodes -days 365 -newkey rsa:%v -keyout "%v" -out "%v" -subj "/C=TG/ST=TG/L=TG/O=Dark Socket/OU=Dark Socket/CN=xxxx"`,
+					conf.HTTPSLen, certKey, certFile)
+				cmd := exec.Command("bash", "-c", openssl)
+				cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+				cmd.Run()
+				httpsStop()
+				time.Sleep(100 * time.Millisecond)
+				httpsStart()
+				time.Sleep(time.Duration(conf.HTTPSGen) * time.Second)
+			}
+		}
+		if conf.HTTPSGen > 0 {
+			go httpsGen()
+		} else {
+			httpsStart()
 		}
 	}
 	wait.Wait()
@@ -143,25 +177,10 @@ func StopServer() {
 }
 
 func parseListenAddr(addr string) (addrs []string, err error) {
-	parts := strings.SplitN(addr, ":", 2)
-	if len(parts) < 2 {
+	addrParts := strings.SplitN(addr, ":", 2)
+	if len(addrParts) < 2 {
 		err = fmt.Errorf("invalid uri")
 		return
 	}
-	ports := strings.SplitN(parts[1], "-", 2)
-	start, err := strconv.ParseInt(ports[0], 10, 32)
-	if err != nil {
-		return
-	}
-	end := start
-	if len(ports) > 1 {
-		end, err = strconv.ParseInt(ports[1], 10, 32)
-		if err != nil {
-			return
-		}
-	}
-	for i := start; i <= end; i++ {
-		addrs = append(addrs, fmt.Sprintf("%v:%v", parts[0], i))
-	}
-	return
+	return parsePortAddr(addrParts[0]+":", addrParts[1], "")
 }
