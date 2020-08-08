@@ -70,43 +70,47 @@ testproxy
 		return
 	}
 	if gfw.IsProxy("xxddsf.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("www.baidu.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("baidu.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("notexistxxx.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("qq.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("x.qq.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("x1.x2.qq.com") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if gfw.IsProxy("192.168.1.1") {
-		t.Error("not proxy")
+		t.Error("hav proxy")
 		return
 	}
 	if !gfw.IsProxy("192.168.1.18") {
 		t.Error("not proxy")
+		return
+	}
+	if gfw.IsProxy("sxbastudio.com") {
+		t.Error("hav proxy")
 		return
 	}
 	fmt.Printf("info:%v\n", gfw)

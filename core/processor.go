@@ -317,10 +317,10 @@ func (p *PACProcessor) ProcConn(r io.ReadWriteCloser, target string) (err error)
 		proxy = false
 	}
 	if proxy {
-		DebugLog("PACProcessor follow proxy(%v) for %v by %v", p.Proxy, r, target)
+		DebugLog("PACProcessor(%v) follow proxy(%v) for %v by %v", p.Mode, p.Proxy, r, target)
 		err = p.Proxy.ProcConn(r, target)
 	} else {
-		DebugLog("PACProcessor follow direct(%v) for %v by %v", p.Direct, r, target)
+		DebugLog("PACProcessor(%v) follow direct(%v) for %v by %v", p.Mode, p.Direct, r, target)
 		err = p.Direct.ProcConn(r, target)
 	}
 	return

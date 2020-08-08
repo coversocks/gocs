@@ -290,7 +290,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 	directProcessor := core.NewProcConnDialer(false, core.NewNetDialer("", ""))
 	pacProcessor := core.NewPACProcessor(client, directProcessor)
 	pacProcessor.Check = gfw.IsProxy
-	pacProcessor.Mode = "global"
+	pacProcessor.Mode = "auto"
 	proxyServer = core.NewSocksProxy()
 	proxyServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
 		err = client.ProcConn(raw, "tcp://"+target)
@@ -328,8 +328,9 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 			core.ErrorLog("Client start auto proxy server fail with %v", err)
 			return
 		}
+		core.InfoLog("Client start auto socks server on %v with mode %v", conf.SocksAutoAddr, pacProcessor.Mode)
 	}
-	core.InfoLog("Client start socks server on %v with mode %v", conf.SocksAddr, pacProcessor.Mode)
+	core.InfoLog("Client start socks server on %v", conf.SocksAddr)
 	changeProxyMode(conf.Mode)
 	// writeRuntimeVar()
 	wait := sync.WaitGroup{}
@@ -350,6 +351,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
 			wait.Done()
 		}()
+		core.InfoLog("Client start htpp server on %v with mode %v", conf.HTTPAddr, pacProcessor.Mode)
 	}
 	if len(conf.HTTPAutoAddr) > 0 {
 		wait.Add(1)
@@ -360,6 +362,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 			wait.Done()
 		}()
 		go proxyAutoServer.Run()
+		core.InfoLog("Client start auto htpp server on %v with mode %v", conf.HTTPAutoAddr, pacProcessor.Mode)
 	}
 	proxyServer.Run()
 	core.InfoLog("Client all listener is stopped")
