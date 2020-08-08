@@ -351,7 +351,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
 			wait.Done()
 		}()
-		core.InfoLog("Client start htpp server on %v with mode %v", conf.HTTPAddr, pacProcessor.Mode)
+		core.InfoLog("Client start http server on %v", conf.HTTPAddr)
 	}
 	if len(conf.HTTPAutoAddr) > 0 {
 		wait.Add(1)
@@ -362,7 +362,7 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 			wait.Done()
 		}()
 		go proxyAutoServer.Run()
-		core.InfoLog("Client start auto htpp server on %v with mode %v", conf.HTTPAutoAddr, pacProcessor.Mode)
+		core.InfoLog("Client start auto http server on %v with mode %v", conf.HTTPAutoAddr, pacProcessor.Mode)
 	}
 	proxyServer.Run()
 	core.InfoLog("Client all listener is stopped")
