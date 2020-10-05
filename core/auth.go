@@ -5,12 +5,14 @@ import (
 	"html/template"
 	"net/http"
 	"sync"
+
+	"github.com/codingeasygo/util/xhash"
 )
 
 //JSONFileAuth is the basic auth impl
 type JSONFileAuth struct {
 	FileName   string
-	adminUser  map[string]string
+	AdminUser  map[string]string
 	normalUser map[string]string
 	userLck    sync.RWMutex
 }
@@ -19,7 +21,7 @@ type JSONFileAuth struct {
 func NewJSONFileAuth(adimUser map[string]string, filename string) (auth *JSONFileAuth) {
 	auth = &JSONFileAuth{
 		FileName:   filename,
-		adminUser:  adimUser,
+		AdminUser:  adimUser,
 		normalUser: map[string]string{},
 		userLck:    sync.RWMutex{},
 	}
@@ -42,7 +44,7 @@ func (j *JSONFileAuth) readAuthFile() (err error) {
 
 func (j *JSONFileAuth) addUser(username, password string) (err error) {
 	j.userLck.Lock()
-	j.normalUser[username] = SHA1([]byte(password))
+	j.normalUser[username] = xhash.SHA1([]byte(password))
 	err = WriteJSON(j.FileName, j.normalUser)
 	j.userLck.Unlock()
 	return
@@ -63,7 +65,7 @@ func (j *JSONFileAuth) BasicAuth(req *http.Request) (ok bool, err error) {
 		j.userLck.RLock()
 		havingPass := j.normalUser[username]
 		j.userLck.RUnlock()
-		if SHA1([]byte(userPass)) != havingPass {
+		if xhash.SHA1([]byte(userPass)) != havingPass {
 			err = fmt.Errorf("username/password is not correct")
 		}
 	}
@@ -79,10 +81,10 @@ func (j *JSONFileAuth) adminBasicAuth(res http.ResponseWriter, req *http.Request
 		return
 	}
 	j.userLck.RLock()
-	havingPass := j.adminUser[username]
+	havingPass := j.AdminUser[username]
 	j.userLck.RUnlock()
 	// fmt.Println(username, userPass, havingPass)
-	if SHA1([]byte(userPass)) != havingPass {
+	if xhash.SHA1([]byte(userPass)) != havingPass {
 		res.WriteHeader(401)
 		fmt.Fprintf(res, "auth fail")
 		ok = false

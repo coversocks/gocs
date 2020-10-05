@@ -4,16 +4,14 @@
             "enable": true,
             "name": "test1",
             "address": [
-                "wss://127.0.0.1:11200-11209,11300/ds?skip_verify=1"
+                "wss://127.0.0.1:11200-11209,11300/cover?skip_verify=1"
             ],
             "username": "test",
             "password": "123"
         }
     ],
-    "socks_addr": "0.0.0.0:11105",
-    "socks_auto_addr": "0.0.0.0:11106",
-    "http_addr": "0.0.0.0:11103",
-    "http_auto_addr": "0.0.0.0:11104",
+    "proxy_addr": "0.0.0.0:11105",
+    "auto_proxy_addr": "0.0.0.0:11106",
     "manager_addr": "0.0.0.0:11101",
     "mode": "global",
     "log": 0,

@@ -11,7 +11,7 @@ output=build
 
 #### Package ####
 srv_name=coversocks
-srv_ver=1.1.0
+srv_ver=1.2.0
 srv_out=$output/$srv_name
 rm -rf $srv_out
 mkdir -p $srv_out
@@ -27,7 +27,6 @@ cp -f gfwlist.txt $srv_out
 cp -f abp.js $srv_out
 cp -f networksetup-*.sh $srv_out
 cp -f run.sh $srv_out
-cp -f privoxy-`uname` $srv_out/privoxy
 
 ###
 cd $output

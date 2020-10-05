@@ -1,9 +1,7 @@
 {
-    "http_listen_addr": ":11400-11401",
-    "https_listen_addr": ":11200-11209,11300",
-    "https_cert": "cscert.crt",
-    "https_key": "cscert.key",
-    "https_gen": 30,
+    "http_addr": ":11400-11401",
+    "https_addr": ":11200-11209,11300",
+    "https_gen": 3000,
     "https_len": 1024,
     "manager": {
         "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"

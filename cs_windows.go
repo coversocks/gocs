@@ -1,11 +1,8 @@
 package gocs
 
 import (
-	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
-	"syscall"
 )
 
 func sysproxyPath() string {
@@ -30,27 +27,5 @@ func changeProxyModeNative(args ...string) (message string, err error) {
 	}
 	out, err := cmd.CombinedOutput()
 	message = string(out)
-	return
-}
-
-var privoxyPath = ExecDir + "\\privoxy.exe"
-
-func runPrivoxyNative(conf string) (err error) {
-	runner := exec.Command(privoxyPath, conf)
-	runner.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow: true,
-	}
-	runner.Stderr = os.Stdout
-	runner.Stdout = os.Stderr
-	err = runner.Start()
-	if err == nil {
-		privoxyLock.Lock()
-		privoxyRunner[fmt.Sprintf("%v", runner)] = runner
-		privoxyLock.Unlock()
-		err = runner.Wait()
-		privoxyLock.Lock()
-		delete(privoxyRunner, fmt.Sprintf("%v", runner))
-		privoxyLock.Unlock()
-	}
 	return
 }

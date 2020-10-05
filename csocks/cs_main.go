@@ -20,16 +20,16 @@ func init() {
 	}()
 }
 
-var version = "v1.1.0"
+var version = "v1.2.0"
 var argConf string
 var argRunServer bool
 var argRunClient bool
 var argRunVersion bool
 
 func init() {
-	flag.StringVar(&argConf, "f", "/etc/coversocks/coversocks.json", "the dark socket configure file")
-	flag.BoolVar(&argRunServer, "s", false, "start dark socket server")
-	flag.BoolVar(&argRunClient, "c", false, "start dark socket client")
+	flag.StringVar(&argConf, "f", "/etc/coversocks/coversocks.json", "the cover socket configure file")
+	flag.BoolVar(&argRunServer, "s", false, "start cover socket server")
+	flag.BoolVar(&argRunClient, "c", false, "start cover socket client")
 	flag.BoolVar(&argRunVersion, "v", false, "show version, current is "+version)
 }
 

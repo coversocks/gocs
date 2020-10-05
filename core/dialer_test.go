@@ -1,20 +1,19 @@
 package core
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/codingeasygo/util/xio"
 	"golang.org/x/net/websocket"
 )
 
@@ -119,6 +118,18 @@ func TestNetDialer(t *testing.T) {
 		t.Error("error")
 		return
 	}
+	_, err = dialer.DialPiper("tcp://", 1024)
+	if err == nil {
+		t.Error("error")
+		return
+	}
+	piper, err := dialer.DialPiper("dns://proxy", 1024)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	piper.Close()
+	fmt.Println(dialer.String())
 }
 
 type TagRWC struct {
@@ -238,201 +249,31 @@ func TestSortedDialer(t *testing.T) {
 	fmt.Println(dialer.State())
 }
 
-func TestMessageDialer(t *testing.T) {
-	wg := sync.WaitGroup{}
-	dialer := NewMessageDialer([]byte("m"), 1024)
-	go func() {
-		for {
-			buf := make([]byte, 1024)
-			n, err := dialer.Read(buf)
-			if err != nil {
-				break
-			}
-			switch buf[9] {
-			case MessageHeadConn:
-				remote := string(buf[10:n])
-				if remote == "tcp://test" {
-					fmt.Printf("dialer conn %v\n", string(buf[10:n]))
-					buf[9] = MessageHeadBack
-					dialer.Write(buf[0:10])
-				} else {
-					buf[9] = MessageHeadBack
-					l := copy(buf[10:], "testerror")
-					dialer.Write(buf[0 : 10+l])
-				}
-			case MessageHeadData:
-				fmt.Printf("dialer recv %v\n", string(buf[10:n]))
-				dialer.Write(buf[0:n])
-			}
-		}
-		wg.Done()
-	}()
-	//test read write
-	{
-		conn, err := dialer.Dial("tcp", "test")
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		var sended, recved int
-		go func() {
-			for {
-				buf := make([]byte, 1024)
-				n, err := conn.Read(buf)
-				if err != nil {
-					break
-				}
-				recved += n
-				fmt.Printf("conn recv %v\n", string(buf[:n]))
-			}
-			wg.Done()
-		}()
-		for i := 0; i < 10; i++ {
-			n, err := fmt.Fprintf(conn, "data-%v\n", i*i*i)
-			if err != nil {
-				break
-			}
-			sended += n
-			fmt.Printf("conn send %v\n", sended)
-		}
-		for recved < sended {
-			time.Sleep(10 * time.Millisecond)
-		}
-		if sended != recved {
-			t.Errorf("sended:%v,recved:%v", sended, recved)
-			return
-		}
-		wg.Add(1)
-		buf := make([]byte, 10)
-		copy(buf, dialer.Header)
-		binary.BigEndian.PutUint64(buf[1:], conn.(*MessageConn).cid)
-		buf[9] = MessageHeadClose
-		dialer.Write(buf)
-		wg.Wait()
+func TestPACDialer(t *testing.T) {
+	var proxy *PACDialer
+	echo := xio.NewEchoDialer()
+	proxy = NewPACDialer(echo, nil)
+	proxy.Mode = "global"
+	raw, err := proxy.DialPiper("proxy", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
 	}
-	//test read buffer too small
-	{
-		conn, err := dialer.Dial("tcp", "test")
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		go func() {
-			for {
-				buf := make([]byte, 10)
-				_, err := conn.(*MessageConn).rawRead(buf)
-				if err != nil {
-					break
-				}
-				t.Error("error recved")
-			}
-			wg.Done()
-		}()
-		wg.Add(1)
-		fmt.Fprintf(conn, "datadatadatadata-%v\n", 1000)
-		wg.Wait()
+	proxy = NewPACDialer(echo, nil)
+	proxy.Mode = "auto"
+	raw, err = proxy.DialPiper("tcp://proxy", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
 	}
-	//
-	//test dial error
-	_, err := dialer.Dial("tcp", "error")
-	if err == nil {
+	proxy = NewPACDialer(nil, echo)
+	proxy.Mode = ""
+	raw, err = proxy.DialPiper("tcp://proxy", 1024)
+	if err != nil || raw == nil {
 		t.Error(err)
 		return
 	}
 	//
-	//test close all
-	conn, err := dialer.Dial("tcp", "test")
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	go func() {
-		for {
-			buf := make([]byte, 1024)
-			n, err := conn.Read(buf)
-			if err != nil {
-				break
-			}
-			fmt.Printf("conn recv %v\n", string(buf[:n]))
-		}
-		wg.Done()
-	}()
-	wg.Add(2)
-	dialer.Close()
-	wg.Wait()
-	//
-	//test error
-	err = conn.(*MessageConn).Connect()
-	if err == nil || err.Error() != "closed" {
-		t.Error(err)
-		return
-	}
-	_, err = conn.Write(nil)
-	if err == nil || err.Error() != "closed" {
-		t.Error(err)
-		return
-	}
-	err = conn.Close()
-	if err == nil || err.Error() != "closed" {
-		t.Error(err)
-		return
-	}
-	//
-	//test dialer error
-	_, err = dialer.Dial("tcp", "test")
-	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
-		return
-	}
-	_, err = dialer.Write(make([]byte, 1024))
-	if err == nil || err.Error() != "closed" {
-		t.Error("nil")
-		return
-	}
-	_, err = dialer.Write(make([]byte, 1))
-	if err == nil || err.Error() != "invalid data" {
-		t.Error("nil")
-		return
-	}
-	dialer2 := NewMessageDialer([]byte("m"), 1024)
-	dialer2.Message <- make([]byte, 10240)
-	_, err = dialer2.Read(make([]byte, 100))
-	if err == nil || !strings.HasPrefix(err.Error(), "buffer is too small") {
-		t.Error(err)
-		return
-	}
-	_, err = dialer2.Write(make([]byte, 1024))
-	if err == nil || err.Error() != "connection not exist" {
-		t.Error(err)
-		return
-	}
-	dialer2.conns[0] = nil
-	_, err = dialer2.Write(make([]byte, 1024))
-	if err == nil || err.Error() != "unknow command(0)" {
-		t.Error(err)
-		return
-	}
-}
-
-func TestMessageDialeEchor(t *testing.T) {
-	dialer := NewMessageDialer([]byte("m"), 1024)
-	dialer.StartEcho(10240)
-	conn, err := dialer.Dial("tcp", "eco")
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	fmt.Fprintf(conn, "testing-%v", 100)
-	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	if err != nil || string(buf[0:n]) != "testing-100" {
-		t.Error(err)
-		return
-	}
-	dialer.Close()
-	_, err = conn.Read(buf)
-	if err == nil {
-		t.Error("error")
-		return
-	}
+	fmt.Printf("%v\n", proxy.String())
+	proxy.DialPiper("tcp://%2f", 1024)
 }

@@ -11,19 +11,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/codingeasygo/util/proxy"
+
+	"github.com/codingeasygo/util/xio"
 	"github.com/coversocks/gocs/core"
 )
 
 // var clientConf string
 // var clientConfDir string
-var client *Client
-var proxyServer *core.SocksProxy
-var proxyAutoServer *core.SocksProxy
-var managerServer *http.Server
-var managerListener net.Listener
 
 // var abpPath = filepath.Join(execDir(), "abp.js")
 // var gfwListPath = filepath.Join(execDir(), "gfwlist.txt")
@@ -56,15 +53,15 @@ func (c *ClientServerDialer) Dial(remote string) (raw io.ReadWriteCloser, err er
 			address += fmt.Sprintf("?username=%v&password=%v", c.Username, c.Password)
 		}
 	}
-	core.InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
+	InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
 	raw, err = c.Base.Dial(address)
 	if err == nil {
-		core.InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
-		conn := core.NewStringConn(raw)
+		InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
+		conn := xio.NewStringConn(raw)
 		conn.Name = c.Name
 		raw = conn
 	} else {
-		core.WarnLog("Client connect one channel to %v-%v fail with %v", c.Name, c.LastUsed, err)
+		WarnLog("Client connect one channel to %v-%v fail with %v", c.Name, c.LastUsed, err)
 	}
 	c.LastUsed = (c.LastUsed + 1) % len(c.Address)
 	return
@@ -77,10 +74,8 @@ func (c *ClientServerDialer) String() string {
 //ClientConf is pojo for dark socks client configure
 type ClientConf struct {
 	Servers       []*ClientServerConf `json:"servers"`
-	SocksAddr     string              `json:"socks_addr"`
-	SocksAutoAddr string              `json:"socks_auto_addr"`
-	HTTPAddr      string              `json:"http_addr"`
-	HTTPAutoAddr  string              `json:"http_auto_addr"`
+	ProxyAddr     string              `json:"proxy_addr"`
+	AutoProxyAddr string              `json:"auto_proxy_addr"`
 	ManagerAddr   string              `json:"manager_addr"`
 	Mode          string              `json:"mode"`
 	LogLevel      int                 `json:"log"`
@@ -90,9 +85,23 @@ type ClientConf struct {
 //Client is dialer by ClientConf
 type Client struct {
 	*core.Client
-	Conf     ClientConf
-	WorkDir  string //current working dir
-	ConfPath string
+	Conf       ClientConf
+	WorkDir    string //current working dir
+	ConfPath   string
+	Dialer     core.Dialer
+	Server     *proxy.Server
+	AutoServer *proxy.Server
+	Manager    *http.Server
+	Listener   net.Listener
+}
+
+//NewClient will return new Client.
+func NewClient(config string, dialer core.Dialer) (client *Client) {
+	client = &Client{
+		ConfPath: config,
+		Dialer:   dialer,
+	}
+	return
 }
 
 //Boostrap will initial setting
@@ -123,7 +132,7 @@ func (c *Client) Boostrap(base core.Dialer) (err error) {
 	}
 	var dialer = core.NewSortedDialer(dialers...)
 	c.Client = core.NewClient(core.DefaultBufferSize, dialer)
-	core.InfoLog("Client boostrap with %v server dialer", len(dialers))
+	InfoLog("Client boostrap with %v server dialer", len(dialers))
 	return
 }
 
@@ -147,7 +156,7 @@ func (c *Client) UpdateGfwlist() (err error) {
 		err = fmt.Errorf("proxy server is not started")
 		return
 	}
-	gfwData, err := c.Client.HTTPGet(gfwListURL)
+	gfwData, err := c.GetBytes(gfwListURL)
 	if err != nil {
 		return
 	}
@@ -164,7 +173,7 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	abpPath := filepath.Join(c.WorkDir, "abp.js")
 	abpRaw, err := ioutil.ReadFile(abpPath)
 	if err != nil {
-		core.ErrorLog("PAC read apb.js fail with %v", err)
+		ErrorLog("PAC read apb.js fail with %v", err)
 		res.WriteHeader(500)
 		fmt.Fprintf(res, "%v", err)
 		return
@@ -174,7 +183,7 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	//rules
 	gfwRules, err := c.ReadGfwRules()
 	if err != nil {
-		core.ErrorLog("PAC read gfwlist.txt fail with %v", err)
+		ErrorLog("PAC read gfwlist.txt fail with %v", err)
 		res.WriteHeader(500)
 		fmt.Fprintf(res, "%v", err)
 		return
@@ -183,15 +192,15 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	abpStr = strings.Replace(abpStr, "__RULES__", string(gfwRulesJS), 1)
 	//
 	//proxy address
-	if proxyServer == nil || proxyServer.Listener == nil {
-		core.ErrorLog("PAC load fail with socks proxy server is not started")
+	if c.Server == nil {
+		ErrorLog("PAC load fail with proxy server is not started")
 		res.WriteHeader(500)
-		fmt.Fprintf(res, "%v", "socks proxy server is not started")
+		fmt.Fprintf(res, "%v", "proxy server is not started")
 		return
 	}
 	//
 	// socksProxy.
-	parts := strings.SplitN(proxyServer.Addr().String(), ":", -1)
+	parts := strings.SplitN(c.Conf.ProxyAddr, ":", -1)
 	abpStr = strings.Replace(abpStr, "__SOCKS5ADDR__", "127.0.0.1", -1)
 	abpStr = strings.Replace(abpStr, "__SOCKS5PORT__", parts[len(parts)-1], -1)
 	res.Write([]byte(abpStr))
@@ -200,7 +209,7 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 //ChangeProxyModeH is http handler to change proxy mode
 func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
-	_, err := changeProxyMode(mode)
+	_, err := c.ChangeProxyMode(mode)
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "%v", err)
@@ -210,7 +219,7 @@ func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	err = core.WriteJSON(c.ConfPath, c.Conf)
 	if err != nil {
 		w.WriteHeader(500)
-		core.WarnLog("Client change proxy mode on config %v fail with %v", c.ConfPath, err)
+		WarnLog("Client change proxy mode on config %v fail with %v", c.ConfPath, err)
 		fmt.Fprintf(w, "%v", err)
 		return
 	}
@@ -243,27 +252,22 @@ func (c *Client) String() string {
 	return "CoverSocksClient"
 }
 
-//StartClient by configure
-func StartClient(c string) (err error) {
-	return StartDialerClient(c, core.NewWebsocketDialer())
-}
-
-//StartDialerClient by configure and dialer
-func StartDialerClient(c string, base core.Dialer) (err error) {
+//Start by configure and dialer
+func (c *Client) Start() (err error) {
 	conf := ClientConf{Mode: "auto"}
-	err = core.ReadJSON(c, &conf)
+	err = core.ReadJSON(c.ConfPath, &conf)
 	if err != nil {
-		core.ErrorLog("Client read configure fail with %v", err)
+		ErrorLog("Client read configure fail with %v", err)
 		return
 	}
-	if len(conf.SocksAddr) < 1 {
-		core.ErrorLog("Client socks_addr is required")
-		err = fmt.Errorf("Client socks_addr is required")
+	if len(conf.ProxyAddr) < 1 {
+		ErrorLog("Client proxy_addr is required")
+		err = fmt.Errorf("Client proxy_addr is required")
 		return
 	}
 	// clientConf = c
 	// clientConfDir = filepath.Dir(clientConf)
-	var workDir = filepath.Dir(c)
+	var workDir = filepath.Dir(c.ConfPath)
 	if len(conf.WorkDir) > 0 {
 		if filepath.IsAbs(conf.WorkDir) {
 			workDir = conf.WorkDir
@@ -273,34 +277,46 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 		workDir, _ = filepath.Abs(workDir)
 	}
 	core.SetLogLevel(conf.LogLevel)
-	core.InfoLog("Client using config from %v, work on %v", c, workDir)
-	client = &Client{ConfPath: c, Conf: conf, WorkDir: workDir}
-	err = client.Boostrap(base)
+	InfoLog("Client using config from %v, work on %v", c, workDir)
+	c.Conf, c.WorkDir = conf, workDir
+	err = client.Boostrap(c.Dialer)
 	if err != nil {
-		core.ErrorLog("Client bootstrap fail with %v", err)
+		ErrorLog("Client bootstrap fail with %v", err)
 		return
 	}
+	defer func() {
+		if err != nil {
+			c.Stop()
+		}
+	}()
 	rules, err := client.ReadGfwRules()
 	if err != nil {
-		core.ErrorLog("Client read gfw rules fail with %v", err)
+		ErrorLog("Client read gfw rules fail with %v", err)
 		return
 	}
 	gfw := core.NewGFW()
 	gfw.Set(strings.Join(rules, "\n"), core.GfwProxy)
-	directProcessor := core.NewProcConnDialer(false, core.NewNetDialer("", ""))
-	pacProcessor := core.NewPACProcessor(client, directProcessor)
+	directProcessor := core.NewNetDialer("", "")
+	pacProcessor := core.NewPACDialer(client, directProcessor)
 	pacProcessor.Check = gfw.IsProxy
 	pacProcessor.Mode = "auto"
-	proxyServer = core.NewSocksProxy()
-	proxyServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
-		err = client.ProcConn(raw, "tcp://"+target)
+	c.Server = proxy.NewServer(client)
+	c.AutoServer = proxy.NewServer(pacProcessor)
+	err = c.Server.Start(conf.ProxyAddr)
+	if err != nil {
+		ErrorLog("Client start proxy server fail with %v", err)
 		return
-	})
-	proxyAutoServer = core.NewSocksProxy()
-	proxyAutoServer.Processor = core.ProcessorF(func(raw io.ReadWriteCloser, target string) (err error) {
-		err = pacProcessor.ProcConn(raw, "tcp://"+target)
-		return
-	})
+	}
+	if len(conf.AutoProxyAddr) > 0 {
+		err = c.AutoServer.Start(conf.AutoProxyAddr)
+		if err != nil {
+			ErrorLog("Client start auto proxy server fail with %v", err)
+			return
+		}
+		InfoLog("Client start auto socks server on %v with mode %v", conf.AutoProxyAddr, pacProcessor.Mode)
+	}
+	InfoLog("Client start proxy server on %v", conf.ProxyAddr)
+	c.ChangeProxyMode(conf.Mode)
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pac.js", client.PACH)
@@ -308,88 +324,38 @@ func StartDialerClient(c string, base core.Dialer) (err error) {
 		mux.HandleFunc("/updateGfwlist", client.UpdateGfwlistH)
 		mux.HandleFunc("/state", client.StateH)
 		var listener net.Listener
-		managerServer = &http.Server{Addr: conf.ManagerAddr, Handler: mux}
+		c.Manager = &http.Server{Addr: conf.ManagerAddr, Handler: mux}
 		listener, err = net.Listen("tcp", conf.ManagerAddr)
 		if err != nil {
-			core.ErrorLog("Client start web server fail with %v", err)
+			ErrorLog("Client start manager server fail with %v", err)
 			return
 		}
-		managerServer.Addr = listener.Addr().String()
-		managerListener = &core.TCPKeepAliveListener{TCPListener: listener.(*net.TCPListener)}
-	}
-	err = proxyServer.Listen(conf.SocksAddr)
-	if err != nil {
-		core.ErrorLog("Client start proxy server fail with %v", err)
-		return
-	}
-	if len(conf.SocksAutoAddr) > 0 {
-		err = proxyAutoServer.Listen(conf.SocksAutoAddr)
-		if err != nil {
-			core.ErrorLog("Client start auto proxy server fail with %v", err)
-			return
-		}
-		core.InfoLog("Client start auto socks server on %v with mode %v", conf.SocksAutoAddr, pacProcessor.Mode)
-	}
-	core.InfoLog("Client start socks server on %v", conf.SocksAddr)
-	changeProxyMode(conf.Mode)
-	// writeRuntimeVar()
-	wait := sync.WaitGroup{}
-	if managerServer != nil {
-		wait.Add(1)
-		core.InfoLog("Client start web server on %v", managerListener.Addr())
+		c.Manager.Addr = listener.Addr().String()
+		c.Listener = &xio.TCPKeepAliveListener{TCPListener: listener.(*net.TCPListener)}
+		InfoLog("Client start web server on %v", conf.ManagerAddr)
 		go func() {
-			xerr := managerServer.Serve(managerListener)
-			core.WarnLog("Client the web server on %v is stopped by %v", managerListener.Addr(), xerr)
-			wait.Done()
+			xerr := c.Manager.Serve(c.Listener)
+			WarnLog("Client the web server on %v is stopped by %v", conf.ManagerAddr, xerr)
 		}()
 	}
-	if len(conf.HTTPAddr) > 0 {
-		wait.Add(1)
-		proxyServer.HTTPUpstream = conf.HTTPAddr
-		go func() {
-			xerr := runPrivoxy(proxyServer, workDir, conf.HTTPAddr, "privoxy.conf")
-			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAddr, xerr)
-			wait.Done()
-		}()
-		core.InfoLog("Client start http server on %v", conf.HTTPAddr)
-	}
-	if len(conf.HTTPAutoAddr) > 0 {
-		wait.Add(1)
-		proxyAutoServer.HTTPUpstream = conf.HTTPAutoAddr
-		go func() {
-			xerr := runPrivoxy(proxyAutoServer, workDir, conf.HTTPAutoAddr, "privoxy_auto.conf")
-			core.WarnLog("Client the privoxy on %v is stopped by %v", conf.HTTPAutoAddr, xerr)
-			wait.Done()
-		}()
-		go proxyAutoServer.Run()
-		core.InfoLog("Client start auto http server on %v with mode %v", conf.HTTPAutoAddr, pacProcessor.Mode)
-	}
-	proxyServer.Run()
-	core.InfoLog("Client all listener is stopped")
-	changeProxyMode("manual")
-	wait.Wait()
+	InfoLog("Client all listener is stopped")
+	c.ChangeProxyMode("manual")
 	return
 }
 
-//StopClient will stop running client
-func StopClient() {
-	core.InfoLog("Client stopping client listener")
-	if proxyServer != nil {
-		proxyServer.Close()
+//Stop will stop running client
+func (c *Client) Stop() {
+	InfoLog("Client stopping client listener")
+	if c.Server != nil {
+		c.Server.Close()
 	}
-	if managerServer != nil {
-		managerServer.Close()
+	if c.AutoServer != nil {
+		c.AutoServer.Close()
 	}
-	privoxyLock.RLock()
-	for _, runner := range privoxyRunner {
-		if runner != nil && runner.Process != nil {
-			runner.Process.Kill()
-		}
+	if c.Manager != nil {
+		c.Manager.Close()
 	}
-	privoxyLock.RUnlock()
-	if client != nil {
-		client.Close()
-	}
+	c.Close()
 }
 
 func parseConnAddr(addr string) (addrs []string, err error) {
@@ -403,75 +369,45 @@ func parseConnAddr(addr string) (addrs []string, err error) {
 	return parsePortAddr(addrParts[0]+":", addrPorts, "/"+addrParts[1])
 }
 
-func changeProxyMode(mode string) (message string, err error) {
-	if proxyServer == nil || proxyServer.Listener == nil || managerServer == nil {
+//ChangeProxyMode will change system proxy mode
+func (c *Client) ChangeProxyMode(mode string) (message string, err error) {
+	if c.Server == nil || c.Manager == nil {
 		err = fmt.Errorf("proxy server is not started")
 		return
 	}
-	proxyServerParts := strings.Split(proxyServer.Addr().String(), ":")
-	managerServerParts := strings.Split(managerServer.Addr, ":")
+	proxyServerParts := strings.Split(c.Conf.ProxyAddr, ":")
+	managerServerParts := strings.Split(c.Conf.ManagerAddr, ":")
 	switch mode {
 	case "auto":
 		pacURL := fmt.Sprintf("http://127.0.0.1:%v/pac.js?timestamp=%v", managerServerParts[len(managerServerParts)-1], time.Now().Local().UnixNano()/1e6)
-		core.InfoLog("start change proxy mode to %v by %v", mode, pacURL)
+		InfoLog("start change proxy mode to %v by %v", mode, pacURL)
 		message, err = changeProxyModeNative("auto", pacURL)
 	case "global":
-		core.InfoLog("start change proxy mode to %v by 127.0.0.1:%v", mode, proxyServerParts[len(proxyServerParts)-1])
+		InfoLog("start change proxy mode to %v by 127.0.0.1:%v", mode, proxyServerParts[len(proxyServerParts)-1])
 		message, err = changeProxyModeNative("global", "127.0.0.1", proxyServerParts[len(proxyServerParts)-1])
 	default:
 		message, err = changeProxyModeNative("manual")
 	}
 	if err != nil {
-		core.WarnLog("change proxy mode to %v fail with %v, the log is\n%v\n", mode, err, message)
+		WarnLog("change proxy mode to %v fail with %v, the log is\n%v\n", mode, err, message)
 	} else {
-		core.InfoLog("change proxy mode to %v is success", mode)
+		InfoLog("change proxy mode to %v is success", mode)
 	}
 	return
 }
 
-const (
-	//PrivoxyTmpl is privoxy template
-	PrivoxyTmpl = `
-listen-address {http}
-toggle  1
-enable-remote-toggle 1
-enable-remote-http-toggle 1
-enable-edit-actions 0
-enforce-blocks 0
-buffer-limit 4096
-forwarded-connect-retries  0
-accept-intercepted-requests 0
-allow-cgi-request-crunching 0
-split-large-forms 0
-keep-alive-timeout 5
-socket-timeout 60
+var client *Client
 
-forward-socks5 / {socks5} .
-forward         192.168.*.*/     .
-forward         10.*.*.*/        .
-forward         127.*.*.*/       .
-
-	`
-)
-
-func writePrivoxyConf(confFile, httpAddr, socksAddr string) (err error) {
-	data := PrivoxyTmpl
-	data = strings.Replace(data, "{http}", httpAddr, 1)
-	data = strings.Replace(data, "{socks5}", socksAddr, 1)
-	err = ioutil.WriteFile(confFile, []byte(data), os.ModePerm)
-	return
+//StartClient will start client by configure
+func StartClient(c string) (err error) {
+	client = NewClient(c, core.NewWebsocketDialer())
+	return client.Start()
 }
 
-func runPrivoxy(proxy *core.SocksProxy, workDir, httpAddr, conf string) (err error) {
-	proxyServerParts := strings.SplitN(proxy.Addr().String(), ":", -1)
-	socksAddr := fmt.Sprintf("127.0.0.1:%v", proxyServerParts[len(proxyServerParts)-1])
-	core.InfoLog("Client start privoxy by listening http proxy on %v and forwarding to %v", httpAddr, socksAddr)
-	confFile := filepath.Join(workDir, conf)
-	err = writePrivoxyConf(confFile, httpAddr, socksAddr)
-	if err != nil {
-		core.WarnLog("Client save privoxy config to %v fail with %v", confFile, err)
-		return
+//StopClient will stop running client
+func StopClient() {
+	if client != nil {
+		client.Stop()
+		client = nil
 	}
-	err = runPrivoxyNative(confFile)
-	return
 }

@@ -1,11 +1,8 @@
-package core
+package gocs
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"os"
 )
 
 const (
@@ -58,27 +55,4 @@ func ErrorLog(format string, args ...interface{}) {
 		return
 	}
 	log.Output(2, fmt.Sprintf("E "+format, args...))
-}
-
-//WriteJSON will marshal value to json and write to file
-func WriteJSON(filename string, v interface{}) (err error) {
-	data, err := json.MarshalIndent(v, "", "    ")
-	if err == nil {
-		err = ioutil.WriteFile(filename, data, os.ModePerm)
-	}
-	return
-}
-
-//ReadJSON will read file and unmarshal to value
-func ReadJSON(filename string, v interface{}) (err error) {
-	data, err := ioutil.ReadFile(filename)
-	if err == nil {
-		err = json.Unmarshal(data, v)
-	}
-	return
-}
-
-//Statable is interface for load object state
-type Statable interface {
-	State() interface{}
 }

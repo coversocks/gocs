@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/codingeasygo/util/xhash"
 )
 
 var client = &http.Client{}
@@ -29,7 +31,7 @@ func httpGet(username, password, u string) (data string, err error) {
 
 func TestJSONFileAuth(t *testing.T) {
 	auth := NewJSONFileAuth(map[string]string{
-		"admin": SHA1([]byte("123")),
+		"admin": xhash.SHA1([]byte("123")),
 	}, filepath.Join(os.TempDir(), "json-file-auth-test.json"))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/addUser", auth.AddUser)

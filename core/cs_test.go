@@ -8,168 +8,32 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/codingeasygo/util/xio"
 
 	_ "net/http/pprof"
 )
 
 func init() {
+	SetLogLevel(LogLevelDebug)
 	go http.ListenAndServe("localhost:6060", nil)
 }
 
-func TestConn(t *testing.T) {
-	//
-	{ //one frame
-		data1 := []byte("one")
-		buf := make([]byte, 4+len(data1))
-		binary.BigEndian.PutUint32(buf, uint32(4+len(data1)))
-		copy(buf[4:], data1)
-		raw := bytes.NewBuffer(buf)
-		proc := NewBaseConn(raw, 256*1024)
-		cmd, err := proc.ReadCmd()
-		if err != nil || !bytes.Equal(cmd, data1) {
-			t.Error(err)
-			return
-		}
-		_, err = proc.ReadCmd()
-		if err != io.EOF {
-			t.Error(err)
-			return
-		}
-	}
-	{ //one frame splice
-		data1 := []byte("one")
-		r, w, _ := os.Pipe()
-		wait := sync.WaitGroup{}
-		wait.Add(1)
-		go func() {
-			proc := NewBaseConn(r, 256*1024)
-			cmd, err := proc.ReadCmd()
-			if err != nil || !bytes.Equal(cmd, data1) {
-				t.Error(err)
-				return
-			}
-			_, err = proc.ReadCmd()
-			if err != io.EOF {
-				t.Error(err)
-				return
-			}
-			wait.Done()
-		}()
-		buf := make([]byte, uint32(4+len(data1)))
-		binary.BigEndian.PutUint32(buf, uint32(4+len(data1)))
-		copy(buf[4:], data1)
-		w.Write(buf[0:3])
-		time.Sleep(time.Millisecond)
-		w.Write(buf[3:])
-		time.Sleep(time.Millisecond)
-		w.Close()
-		time.Sleep(time.Millisecond)
-		wait.Wait()
-	}
-	//
-	{ //two frame
-		data1 := []byte("two1")
-		data2 := []byte("two2")
-		buf := make([]byte, 8+len(data1)+len(data2))
-		binary.BigEndian.PutUint32(buf, uint32(4+len(data1)))
-		copy(buf[4:], data1)
-		binary.BigEndian.PutUint32(buf[4+len(data1):], uint32(4+len(data2)))
-		copy(buf[8+len(data1):], data2)
-		raw := bytes.NewBuffer(buf)
-		//
-		proc := NewBaseConn(raw, 256*1024)
-		cmd, err := proc.ReadCmd()
-		if err != nil || !bytes.Equal(cmd, data1) {
-			t.Error(err)
-			return
-		}
-		cmd, err = proc.ReadCmd()
-		if err != nil || !bytes.Equal(cmd, data2) {
-			t.Error(err)
-			return
-		}
-		_, err = proc.ReadCmd()
-		if err != io.EOF {
-			t.Error(err)
-			return
-		}
-	}
-	//
-	{ //two frame splice
-		data1 := []byte("splice1")
-		data2 := []byte("splice2")
-		r, w, _ := os.Pipe()
-		wait := sync.WaitGroup{}
-		wait.Add(1)
-		go func() {
-			proc := NewBaseConn(r, 256*1024)
-			cmd, err := proc.ReadCmd()
-			if err != nil || !bytes.Equal(cmd, data1) {
-				t.Error(err)
-				return
-			}
-			cmd, err = proc.ReadCmd()
-			if err != nil || !bytes.Equal(cmd, data2) {
-				t.Error(err)
-				return
-			}
-			_, err = proc.ReadCmd()
-			if err != io.EOF {
-				t.Error(err)
-				return
-			}
-			wait.Done()
-		}()
-		buf := make([]byte, 1024)
-		binary.BigEndian.PutUint32(buf, uint32(4+len(data1)))
-		copy(buf[4:], data1)
-		binary.BigEndian.PutUint32(buf[4+len(data1):], uint32(4+len(data2)))
-		copy(buf[8+len(data1):], data2[:1])
-		w.Write(buf[:8+len(data1)+1])
-		time.Sleep(time.Millisecond)
-		w.Write(data2[1:])
-		time.Sleep(time.Millisecond)
-		w.Close()
-		time.Sleep(time.Millisecond)
-		wait.Wait()
-	}
-	{ //test too large
-		buf := make([]byte, 1024)
-		binary.BigEndian.PutUint32(buf, 1000000)
-		proc := NewBaseConn(bytes.NewBuffer(buf), 1024)
-		_, err := proc.ReadCmd()
-		if err == nil {
-			t.Error(err)
-			return
-		}
-	}
-	{ //test string
-		wsRaw := &websocket.Conn{}
-		fmt.Printf("%v\n", NewBaseConn(wsRaw, 1024))
-		netRaw := &net.TCPConn{}
-		fmt.Printf("%v\n", NewBaseConn(netRaw, 1024))
-	}
-}
-
-func TestDarkSocket(t *testing.T) {
-	SetLogLevel(LogLevelDebug)
-	//
+func TestCoversocket(t *testing.T) {
 	buf := make([]byte, 1024)
 	wait := sync.WaitGroup{}
 	{ //normal process
 		//
-		serverChannel, clientChannel, _ := CreatePipeConn()
+		serverChannel, clientChannel, _ := xio.CreatePipedConn()
 		serverChannel.Alias, clientChannel.Alias = "ServerChannel", "ClientChannel"
-		serverConn, serverRemote, _ := CreatePipeConn()
+		serverConn, serverRemote, _ := xio.CreatePipedConn()
 		serverConn.Alias, serverRemote.Alias = "ServerConn", "ServerRemote"
-		clientConn, clientRemote, _ := CreatePipeConn()
+		clientConn, clientRemote, _ := xio.CreatePipedConn()
 		clientConn.Alias, clientRemote.Alias = "ClientConn", "ClientRemote"
 		//
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -179,7 +43,7 @@ func TestDarkSocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(NewBaseConn(serverChannel, server.BufferSize))
+			server.ProcConn(serverChannel)
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -189,7 +53,7 @@ func TestDarkSocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			client.ProcConn(clientConn, "test")
+			client.PipeConn(clientConn, "test")
 			wait.Done()
 		}()
 		//
@@ -221,9 +85,9 @@ func TestDarkSocket(t *testing.T) {
 		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "ok")
 		}))
-		serverChannel, clientChannel, _ := CreatePipeConn()
+		serverChannel, clientChannel, _ := xio.CreatePipedConn()
 		serverChannel.Alias, clientChannel.Alias = "ServerChannel", "ClientChannel"
-		serverConn, serverRemote, _ := CreatePipeConn()
+		serverConn, serverRemote, _ := xio.CreatePipedConn()
 		serverConn.Alias, serverRemote.Alias = "ServerConn", "ServerRemote"
 		//
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -234,7 +98,7 @@ func TestDarkSocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(NewBaseConn(serverChannel, server.BufferSize))
+			server.ProcConn(serverChannel)
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -242,7 +106,7 @@ func TestDarkSocket(t *testing.T) {
 			DebugLog("test client dial to %v success", remote)
 			return
 		}))
-		res, err := client.HTTPGet("http://xxxx")
+		res, err := client.GetText("http://xxxx")
 		if err != nil || string(res) != "ok" {
 			t.Error(err)
 			return
@@ -259,11 +123,11 @@ func TestDarkSocket(t *testing.T) {
 	}
 	{ //server dial error
 		//
-		serverChannel, clientChannel, _ := CreatePipeConn()
+		serverChannel, clientChannel, _ := xio.CreatePipedConn()
 		serverChannel.Alias, clientChannel.Alias = "ServerChannel", "ClientChannel"
-		serverConn, serverRemote, _ := CreatePipeConn()
+		serverConn, serverRemote, _ := xio.CreatePipedConn()
 		serverConn.Alias, serverRemote.Alias = "ServerConn", "ServerRemote"
-		clientConn, clientRemote, _ := CreatePipeConn()
+		clientConn, clientRemote, _ := xio.CreatePipedConn()
 		clientConn.Alias, clientRemote.Alias = "ClientConn", "ClientRemote"
 		//
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -276,7 +140,7 @@ func TestDarkSocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(NewBaseConn(serverChannel, server.BufferSize))
+			server.ProcConn(serverChannel)
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -284,9 +148,10 @@ func TestDarkSocket(t *testing.T) {
 			DebugLog("test client dial to %v success", remote)
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		wait.Add(1)
 		go func() {
-			client.ProcConn(clientConn, "test")
+			client.PipeConn(clientConn, "test")
 			wait.Done()
 		}()
 		//
@@ -300,7 +165,7 @@ func TestDarkSocket(t *testing.T) {
 		serverRemote.Close()
 		time.Sleep(time.Millisecond)
 		//
-		err := client.ProcConn(clientConn, "error")
+		err := client.PipeConn(clientConn, "error")
 		if err == nil {
 			t.Error(err)
 			return
@@ -316,8 +181,9 @@ func TestDarkSocket(t *testing.T) {
 			err = fmt.Errorf("error")
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		clientConn := NewErrMockConn(1, 1)
-		err := client.ProcConn(clientConn, "test")
+		err := client.PipeConn(clientConn, "test")
 		if err == nil || err.Error() != "error" {
 			t.Error(err)
 			return
@@ -336,7 +202,7 @@ func TestDarkSocket(t *testing.T) {
 		binary.BigEndian.PutUint32(buf1, 8)
 		copy(buf1[4:], []byte("abcd"))
 		procConn1.ReadData <- buf1
-		err := server.ProcConn(NewBaseConn(procConn1, server.BufferSize))
+		err := server.ProcConn(procConn1)
 		if err == nil {
 			t.Error(err)
 			return
@@ -349,7 +215,7 @@ func TestDarkSocket(t *testing.T) {
 		copy(buf2[5:], []byte("abc"))
 		procConn2.ReadData <- buf2
 		procConn2.ReadErrC = 2
-		err = server.ProcConn(NewBaseConn(procConn2, server.BufferSize))
+		err = server.ProcConn(procConn2)
 		if err == nil {
 			t.Error(err)
 			return
@@ -364,8 +230,9 @@ func TestDarkSocket(t *testing.T) {
 			raw = remoteConn
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		clientConn := NewErrMockConn(1, 1)
-		err := client.ProcConn(clientConn, "test")
+		err := client.PipeConn(clientConn, "test")
 		if err == nil {
 			t.Error(err)
 			return
@@ -377,8 +244,9 @@ func TestDarkSocket(t *testing.T) {
 			raw = remoteConn
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		clientConn = NewErrMockConn(1, 2)
-		err = client.ProcConn(clientConn, "test")
+		err = client.PipeConn(clientConn, "test")
 		if err == nil {
 			t.Error(err)
 			return
@@ -394,8 +262,9 @@ func TestDarkSocket(t *testing.T) {
 			raw = remoteConn
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		clientConn = NewErrMockConn(1, 2)
-		err = client.ProcConn(clientConn, "test")
+		err = client.PipeConn(clientConn, "test")
 		if err == nil {
 			t.Error(err)
 			return
@@ -412,13 +281,14 @@ func TestDarkSocket(t *testing.T) {
 			raw = remoteConn
 			return
 		}))
+		client.TryDelay = time.Millisecond
 		clientConn = NewErrMockConn(1, 2)
-		err = client.ProcConn(clientConn, "test")
+		err = client.PipeConn(clientConn, "test")
 		if err == nil {
 			t.Error(err)
 			return
 		}
-		// err := client.ProcConn(clientConn, "test")
+		// err := client.PipeConn(clientConn, "test")
 		// if err == nil || err.Error() != "error" {
 		// 	t.Error(err)
 		// 	return
@@ -507,8 +377,8 @@ func TestCopyRemote2ChannelErr(t *testing.T) {
 		target = NewErrMockConn(1, 1)
 		conn = NewErrMockConn(1, 2)
 		target.ReadErrC = 1
-		err = copyRemote2Channel(1024, NewBaseConn(conn, 1024), target)
-		fmt.Println("xxxx")
+		channel := NewChannelConn(conn, 1024)
+		err = channel.ReadFrom(target)
 		<-conn.WriteData
 		if err == nil {
 			t.Error(err)
@@ -522,7 +392,8 @@ func TestCopyRemote2ChannelErr(t *testing.T) {
 		conn = NewErrMockConn(1, 2)
 		conn.WriteErrC = 1
 		target.ReadData <- []byte("test")
-		err = copyRemote2Channel(1024, NewBaseConn(conn, 1024), target)
+		channel := NewChannelConn(conn, 1024)
+		channel.ReadFrom(target)
 		if err == nil {
 			t.Error(err)
 			return
@@ -539,7 +410,8 @@ func TestCopyChannel2RemoteErr(t *testing.T) {
 		target = NewErrMockConn(1, 1)
 		conn = NewErrMockConn(1, 1)
 		conn.ReadErrC = 1
-		err = copyChannel2Remote(NewBaseConn(conn, 1024), target)
+		channel := NewChannelConn(conn, 1024)
+		err = channel.WriteTo(target)
 		if err == nil {
 			t.Error(err)
 			return
@@ -554,10 +426,101 @@ func TestCopyChannel2RemoteErr(t *testing.T) {
 		binary.BigEndian.PutUint32(buf, 8)
 		copy(buf[4:], []byte("abcd"))
 		conn.ReadData <- buf
-		err = copyChannel2Remote(NewBaseConn(conn, 1024), target)
+		channel := NewChannelConn(conn, 1024)
+		err = channel.WriteTo(target)
 		if err == nil {
 			t.Error(err)
 			return
 		}
 	}
+}
+
+type chanBuffer struct {
+	wait   chan int
+	readc  int
+	sended []byte
+	recved []byte
+	closed uint32
+}
+
+func newChanBuffer() (buffer *chanBuffer) {
+	buffer = &chanBuffer{
+		wait: make(chan int, 1),
+	}
+	return
+}
+
+func (c *chanBuffer) Read(p []byte) (n int, err error) {
+	if atomic.LoadUint32(&c.closed) < 1 {
+		switch c.readc {
+		case 0:
+			n = copy(p, c.sended)
+			// fmt.Printf("read data---->\n")
+			c.readc++
+		default:
+			<-c.wait
+			err = io.EOF
+			// fmt.Printf("read eof---->\n")
+		}
+	} else {
+		err = fmt.Errorf("closed")
+	}
+	return
+}
+
+func (c *chanBuffer) Write(p []byte) (n int, err error) {
+	if atomic.LoadUint32(&c.closed) < 1 {
+		buf := make([]byte, len(p))
+		n = copy(buf, p)
+		c.recved = buf
+		c.wait <- 1
+		// fmt.Printf("write---->\n")
+	} else {
+		err = fmt.Errorf("closed")
+	}
+	return
+}
+
+func (c *chanBuffer) Close() (err error) {
+	atomic.StoreUint32(&c.closed, 1)
+	// fmt.Printf("closed---->\n")
+	return
+}
+
+func (c *chanBuffer) String() string {
+	return "chanBuffer"
+}
+
+func BenchmarkCoversocksConn(b *testing.B) {
+	logLevel = -1
+	server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+		raw = xio.NewEchoConn()
+		return
+	}))
+	client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+		serverChannel, raw, err := xio.CreatePipedConn()
+		if err == nil {
+			go server.ProcConn(serverChannel)
+		}
+		return
+	}))
+	var runc int64
+	var errc int64
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			uri := fmt.Sprintf("data-%v", atomic.AddInt64(&runc, 1))
+			conn := newChanBuffer()
+			conn.sended = []byte(uri)
+			err := client.PipeConn(conn, uri)
+			if err != nil && err != io.EOF {
+				atomic.AddInt64(&errc, 1)
+			}
+			if !bytes.Equal(conn.sended, conn.recved) {
+				b.Errorf("error,\nsended:%x\nrecved:%x\n", conn.sended, conn.recved)
+			}
+		}
+	})
+	client.Close()
+	server.Close()
 }

@@ -1,44 +1,38 @@
 package gocs
 
-// import (
-// 	"fmt"
-// 	"io"
-// 	"net/http/httptest"
-// 	"strings"
-// 	"testing"
+import (
+	"testing"
+)
 
-// 	"golang.org/x/net/websocket"
-// )
-
-// func TestParseListenAddr(t *testing.T) {
-// 	addrs, err := parseListenAddr("xxx:1")
-// 	if err != nil || len(addrs) != 1 {
-// 		t.Error(err)
-// 		return
-// 	}
-// 	addrs, err = parseListenAddr("xxx:1-2")
-// 	if err != nil || len(addrs) != 2 {
-// 		t.Error(err)
-// 		return
-// 	}
-// 	//
-// 	//test error
-// 	_, err = parseListenAddr("xxx")
-// 	if err == nil {
-// 		t.Error(err)
-// 		return
-// 	}
-// 	_, err = parseListenAddr("xxx:x")
-// 	if err == nil {
-// 		t.Error(err)
-// 		return
-// 	}
-// 	_, err = parseListenAddr("xxx:1-x")
-// 	if err == nil {
-// 		t.Error(err)
-// 		return
-// 	}
-// }
+func TestParseListenAddr(t *testing.T) {
+	addrs, err := parseListenAddr("xxx:1")
+	if err != nil || len(addrs) != 1 {
+		t.Error(err)
+		return
+	}
+	addrs, err = parseListenAddr("xxx:1-2")
+	if err != nil || len(addrs) != 2 {
+		t.Error(err)
+		return
+	}
+	//
+	//test error
+	_, err = parseListenAddr("xxx")
+	if err == nil {
+		t.Error(err)
+		return
+	}
+	_, err = parseListenAddr("xxx:x")
+	if err == nil {
+		t.Error(err)
+		return
+	}
+	_, err = parseListenAddr("xxx:1-x")
+	if err == nil {
+		t.Error(err)
+		return
+	}
+}
 
 // func TestClientConf(t *testing.T) {
 // 	buf := make([]byte, 1024)

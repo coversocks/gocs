@@ -10,8 +10,8 @@
             "password": "123"
         }
     ],
-    "socks_addr": "0.0.0.0:1105",
-    "http_addr": "0.0.0.0:1103",
+    "proxy_addr": "0.0.0.0:1105",
+    "auto_proxy_addr": "0.0.0.0:1104",
     "manager_addr": "0.0.0.0:1101",
     "mode": "auto"
 }

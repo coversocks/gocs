@@ -1,16 +1,17 @@
 package core
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
 	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/codingeasygo/util/xhttp"
+	"github.com/codingeasygo/util/xio"
+	"github.com/codingeasygo/util/xio/frame"
 )
 
 const (
@@ -18,198 +19,67 @@ const (
 	DefaultBufferSize = 64 * 1024
 )
 
-//Conn is interface for read/write raw connection by command mode
-type Conn interface {
-	ID() uint64
-	ReadCmd() (cmd []byte, err error)
-	WriteCmd(cmd []byte) (w int, err error)
-	Close() (err error)
-	SetErr(err error)
-	PreErr() (err error)
-	LastUsed() (latest time.Time)
+//ChannelConn is cs connection
+type ChannelConn struct {
+	*frame.BaseReadWriteCloser
+	Key        string
+	LastUsed   time.Time
+	Error      error
+	BufferSize int
+	Using      string
 }
 
-//connSequence is the sequence to create Conn.ID()
-var connSequence uint64
-
-//BaseConn imple read/write raw connection by command mode
-type BaseConn struct {
-	id     uint64
-	buf    []byte
-	offset uint32
-	length uint32
-	raw    io.ReadWriter
-	latest time.Time
-	Err    error
-}
-
-//NewBaseConn will create new Conn by raw reader/writer and buffer size
-func NewBaseConn(raw io.ReadWriter, bufferSize int) (conn *BaseConn) {
-	conn = &BaseConn{
-		id:  atomic.AddUint64(&connSequence, 1),
-		buf: make([]byte, bufferSize),
-		raw: raw,
+//NewChannelConn will return new channel
+func NewChannelConn(raw io.ReadWriteCloser, bufferSize int) (conn *ChannelConn) {
+	conn = &ChannelConn{
+		BaseReadWriteCloser: frame.NewReadWriteCloser(raw, bufferSize),
+		LastUsed:            time.Now(),
+		BufferSize:          bufferSize,
 	}
+	conn.Key = fmt.Sprintf("%p", conn)
 	return
 }
 
-//ID will reture connection id
-func (b *BaseConn) ID() uint64 {
-	return b.id
-}
-
-//readMore will read more data to buffer
-func (b *BaseConn) readMore() (err error) {
-	readed, err := b.raw.Read(b.buf[b.offset+b.length:])
-	if err == nil {
-		b.length += uint32(readed)
-	}
-	b.latest = time.Now()
-	return
-}
-
-//ReadCmd will read raw reader as command mode.
-//the commad protocol is:lenght(4 byte)+data
-func (b *BaseConn) ReadCmd() (cmd []byte, err error) {
-	more := b.length < 5
-	for {
-		if more {
-			err = b.readMore()
-			if err != nil {
-				break
-			}
-			if b.length < 5 {
-				continue
-			}
-		}
-		b.buf[b.offset] = 0
-		frameLength := binary.BigEndian.Uint32(b.buf[b.offset:])
-		if frameLength > uint32(len(b.buf)) {
-			err = fmt.Errorf("frame too large")
-			break
-		}
-		if b.length < frameLength {
-			more = true
-			if b.offset > 0 {
-				copy(b.buf[0:], b.buf[b.offset:b.offset+b.length])
-				b.offset = 0
-			}
-			continue
-		}
-		cmd = b.buf[b.offset+4 : b.offset+frameLength]
-		b.offset += frameLength
-		b.length -= frameLength
-		more = b.length <= 4
-		if b.length < 1 {
-			b.offset = 0
-		}
-		break
-	}
-	return
-}
-
-func (b *BaseConn) Read(p []byte) (n int, err error) {
-	data, err := b.ReadCmd()
-	if err == nil {
-		n = copy(p, data)
-	}
-	return
-}
-
-//WriteCmd will write data by command mode
-func (b *BaseConn) WriteCmd(cmd []byte) (w int, err error) {
-	binary.BigEndian.PutUint32(cmd, uint32(len(cmd)))
-	cmd[0] = byte(rand.Intn(255))
-	w, err = b.raw.Write(cmd)
-	// if err == nil {
-	// 	fmt.Printf("Cmd Write %v %v\n", len(cmd), cmd)
-	// }
-	b.latest = time.Now()
-	return
-}
-
-func (b *BaseConn) Write(p []byte) (n int, err error) {
-	// fmt.Printf("Conn Begin %v %v\n", len(p), p)
-	buf := make([]byte, len(p)+4)
-	copy(buf[4:], p)
-	n = len(buf)
-	// fmt.Printf("Conn Write %v,%v %v\n", len(buf), len(p), buf)
-	_, err = b.WriteCmd(buf)
-	return
-}
-
-//LastUsed will return last used time
-func (b *BaseConn) LastUsed() (latest time.Time) {
-	latest = b.latest
-	return
-}
-
-//Close will check raw if io.Closer and close it
-func (b *BaseConn) Close() (err error) {
-	if closer, ok := b.raw.(io.Closer); ok {
-		err = closer.Close()
-	}
-	b.Err = fmt.Errorf("closed")
-	return
-}
-
-func (b *BaseConn) String() string {
-	return remoteAddr(b.raw)
-}
-
-//SetErr will mark error
-func (b *BaseConn) SetErr(err error) {
-	b.Err = err
-}
-
-//PreErr will get prefix error
-func (b *BaseConn) PreErr() (err error) {
-	err = b.Err
-	return
-}
-
-//copyRemote2Channel will read target connection data and write to channel connection by command mode
-func copyRemote2Channel(bufferSize int, conn Conn, target io.ReadWriteCloser) (err error) {
+//ReadFrom will read target connection data and write to channel connection by command mode
+func (c *ChannelConn) ReadFrom(target io.ReadWriteCloser) (err error) {
 	var readed int
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, c.BufferSize)
 	for {
 		readed, err = target.Read(buf[5:])
 		if err != nil {
 			break
 		}
-		// fmt.Printf("R2C:%v->%v:%v\n", target, conn, readed)
 		buf[4] = CmdConnData
-		_, err = conn.WriteCmd(buf[:readed+5])
+		_, err = c.WriteFrame(buf[:readed+5])
 		if err != nil {
-			conn.SetErr(err)
+			c.Error = err
 			break
 		}
 	}
 	target.Close()
-	if conn.PreErr() == nil {
-		conn.WriteCmd(append([]byte{0, 0, 0, 0, CmdConnClose}, []byte(err.Error())...))
+	if c.Error == nil {
+		c.WriteFrame(append([]byte{0, 0, 0, 0, CmdConnClose}, []byte(err.Error())...))
 	}
 	return
 }
 
-//copyChannel2Remote will read channel connection data by command mode and write to target
-func copyChannel2Remote(conn Conn, target io.ReadWriteCloser) (err error) {
+//WriteTo will read channel connection data by command mode and write to target
+func (c *ChannelConn) WriteTo(target io.ReadWriteCloser) (err error) {
 	var cmd []byte
 	for {
-		cmd, err = conn.ReadCmd()
+		cmd, err = c.ReadFrame()
 		if err != nil {
-			conn.SetErr(err)
+			c.Error = err
 			break
 		}
-		// fmt.Printf("C2R:%v->%v:%v\n", conn, target, len(cmd))
-		switch cmd[0] {
+		switch cmd[4] {
 		case CmdConnData:
-			_, err = target.Write(cmd[1:])
+			_, err = target.Write(cmd[5:])
 		case CmdConnClose:
-			err = fmt.Errorf("%v", string(cmd[1:]))
+			err = fmt.Errorf("%v", string(cmd[5:]))
 		default:
-			err = fmt.Errorf("error command:%x", cmd[0])
-			conn.SetErr(err)
+			err = fmt.Errorf("error command:%x", cmd[4])
+			c.Error = err
 		}
 		if err != nil {
 			break
@@ -219,18 +89,25 @@ func copyChannel2Remote(conn Conn, target io.ReadWriteCloser) (err error) {
 	return
 }
 
-type handlerErrConn struct {
-	*BaseConn
-	Closer func()
-	closed bool
+//PipeTo will pipe channel to connection.
+func (c *ChannelConn) PipeTo(target io.ReadWriteCloser) (err error) {
+	var xerr error
+	wait := sync.WaitGroup{}
+	wait.Add(1)
+	go func() {
+		xerr = c.WriteTo(target)
+		wait.Done()
+	}()
+	err = c.ReadFrom(target)
+	wait.Wait()
+	if err == nil {
+		err = xerr
+	}
+	return
 }
 
-func (h *handlerErrConn) Close() error {
-	if !h.closed {
-		h.closed = true
-		h.Closer()
-	}
-	return h.BaseConn.Close()
+func (c *ChannelConn) String() string {
+	return fmt.Sprintf("%v", c.BaseReadWriteCloser)
 }
 
 const (
@@ -248,6 +125,8 @@ const (
 type Server struct {
 	BufferSize int
 	Dialer     Dialer
+	conns      map[string]*ChannelConn
+	connsLck   sync.RWMutex
 }
 
 //NewServer will create Server by buffer size and dialer
@@ -255,92 +134,107 @@ func NewServer(bufferSize int, dialer Dialer) (server *Server) {
 	server = &Server{
 		BufferSize: bufferSize,
 		Dialer:     dialer,
+		conns:      map[string]*ChannelConn{},
+		connsLck:   sync.RWMutex{},
 	}
 	return
 }
 
 //ProcConn will start process proxy connection
-func (s *Server) ProcConn(conn Conn) (err error) {
-	InfoLog("Server one channel is starting from %v", conn)
+func (s *Server) ProcConn(raw io.ReadWriteCloser) (err error) {
+	conn := NewChannelConn(raw, s.BufferSize)
+	s.connsLck.Lock()
+	s.conns[conn.Key] = conn
+	s.connsLck.Unlock()
+	defer func() {
+		s.connsLck.Lock()
+		delete(s.conns, conn.Key)
+		s.connsLck.Unlock()
+	}()
+	InfoLog("Server one channel is starting from %v", xio.RemoteAddr(raw))
 	for {
-		cmd, xerr := conn.ReadCmd()
+		cmd, xerr := conn.ReadFrame()
 		if xerr != nil {
-			conn.SetErr(xerr)
+			conn.Error = xerr
 			break
 		}
-		if cmd[0] != CmdConnDial {
+		if cmd[4] != CmdConnDial {
 			WarnLog("Server connection from %v will be closed by expected dail command, but %x", conn, cmd[0])
 			xerr = fmt.Errorf("protocol error")
-			conn.SetErr(xerr)
+			conn.Error = xerr
 			break
 		}
-		targetURI := string(cmd[1:])
+		targetURI := string(cmd[5:])
 		DebugLog("Server receive dail connec to %v from %v", targetURI, conn)
 		target, xerr := s.Dialer.Dial(targetURI)
 		if xerr != nil {
 			InfoLog("Server dial to %v fail with %v", targetURI, xerr)
-			conn.WriteCmd(append([]byte{0, 0, 0, 0, CmdConnBack}, []byte(xerr.Error())...))
+			conn.WriteFrame(append([]byte{0, 0, 0, 0, CmdConnBack}, []byte(xerr.Error())...))
 			continue
 		}
-		conn.WriteCmd(append([]byte{0, 0, 0, 0, CmdConnBack}, []byte("ok")...))
+		conn.WriteFrame(append([]byte{0, 0, 0, 0, CmdConnBack}, []byte("ok")...))
+		conn.Using = targetURI
 		DebugLog("Server transfer is started from %v to %v", conn, target)
-		s.procRemote(conn, target)
+		conn.PipeTo(target)
 		DebugLog("Server transfer is stopped from %v to %v", conn, target)
-		if conn.PreErr() != nil {
+		conn.Using = ""
+		if conn.Error != nil {
 			break
 		}
 	}
 	conn.Close()
-	InfoLog("Server the channel(%v) is stopped by %v", conn, conn.PreErr())
-	err = conn.PreErr()
+	InfoLog("Server the channel(%v) is stopped by %v", xio.RemoteAddr(raw), conn.Error)
+	err = conn.Error
 	return
 }
 
-//procRemote will transfer data between channel and target
-func (s *Server) procRemote(conn Conn, target io.ReadWriteCloser) (err error) {
-	wait := sync.WaitGroup{}
-	wait.Add(1)
-	go func() {
-		copyChannel2Remote(conn, target)
-		wait.Done()
-	}()
-	err = copyRemote2Channel(s.BufferSize, conn, target)
-	wait.Wait()
+//Close will cose all connection
+func (s *Server) Close() (err error) {
+	s.connsLck.Lock()
+	for _, conn := range s.conns {
+		conn.Close()
+	}
+	s.connsLck.Unlock()
 	return
 }
 
 //Client is normal client for implement dark socket protocl
 type Client struct {
-	conns      map[uint64]Conn
-	idles      map[uint64]Conn
+	*xhttp.Client
+	conns      map[string]*ChannelConn
+	idles      map[string]*ChannelConn
 	connsLck   sync.RWMutex
 	BufferSize int
 	MaxIdle    int
 	Dialer     Dialer
-	HTTPClient *http.Client
+	TryMax     int
+	TryDelay   time.Duration
 }
 
 //NewClient will create client by buffer size and dialer
 func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 	client = &Client{
-		conns:      map[uint64]Conn{},
-		idles:      map[uint64]Conn{},
+		conns:      map[string]*ChannelConn{},
+		idles:      map[string]*ChannelConn{},
 		connsLck:   sync.RWMutex{},
 		MaxIdle:    100,
 		BufferSize: bufferSize,
 		Dialer:     dialer,
+		TryMax:     5,
+		TryDelay:   500 * time.Millisecond,
 	}
-	client.HTTPClient = &http.Client{
+	raw := &http.Client{
 		Transport: &http.Transport{
 			Dial: client.httpDial,
 		},
 	}
+	client.Client = xhttp.NewClient(raw)
 	return
 }
 
 //Close will close all proc connection
 func (c *Client) Close() (err error) {
-	conns := []Conn{}
+	conns := []frame.ReadWriteCloser{}
 	c.connsLck.Lock()
 	for _, conn := range c.conns {
 		conns = append(conns, conn)
@@ -353,18 +247,19 @@ func (c *Client) Close() (err error) {
 }
 
 func (c *Client) httpDial(network, addr string) (conn net.Conn, err error) {
-	proxy, conn, err := CreatePipeConn()
+	proxy, conn, err := xio.CreatePipedConn()
 	if err == nil {
-		go c.ProcConn(proxy, addr)
+		go c.PipeConn(proxy, addr)
 	}
 	return
 }
 
 //pullConn will return Conn in idle pool, if pool is empty, dial new by Dialer
-func (c *Client) pullConn() (conn Conn, err error) {
+func (c *Client) pullConn() (conn *ChannelConn, err error) {
+	var key string
 	c.connsLck.Lock()
-	for _, conn = range c.idles {
-		delete(c.idles, conn.ID())
+	for key, conn = range c.idles {
+		delete(c.idles, key)
 		break
 	}
 	c.connsLck.Unlock()
@@ -376,29 +271,21 @@ func (c *Client) pullConn() (conn Conn, err error) {
 	if err != nil {
 		return
 	}
-	baseConn := NewBaseConn(raw, c.BufferSize)
+	conn = NewChannelConn(raw, c.BufferSize)
 	c.connsLck.Lock()
-	conn = &handlerErrConn{
-		BaseConn: baseConn,
-		Closer: func() {
-			c.connsLck.Lock()
-			delete(c.conns, baseConn.ID())
-			c.connsLck.Unlock()
-		},
-	}
-	c.conns[conn.ID()] = conn
+	c.conns[conn.Key] = conn
 	c.connsLck.Unlock()
 	return
 }
 
 //pushConn will push one Conn to idle pool
-func (c *Client) pushConn(conn Conn) {
+func (c *Client) pushConn(conn *ChannelConn) {
 	c.connsLck.Lock()
 	if len(c.idles) > c.MaxIdle {
 		var oldestTime = time.Now()
-		var oldest Conn
+		var oldest *ChannelConn
 		for _, c := range c.idles {
-			last := c.LastUsed()
+			last := c.LastUsed
 			if oldestTime.Sub(last) > 0 {
 				oldestTime = last
 				oldest = c
@@ -409,80 +296,102 @@ func (c *Client) pushConn(conn Conn) {
 			oldest.Close()
 		}
 	}
-	c.idles[conn.ID()] = conn
+	delete(c.conns, conn.Key)
+	c.idles[conn.Key] = conn
 	c.connsLck.Unlock()
 	DebugLog("Client push one channel to idle pool")
 }
 
-//ProcConn will start process proxy connection
-func (c *Client) ProcConn(raw io.ReadWriteCloser, target string) (err error) {
+//PipeConn will start process proxy connection
+func (c *Client) PipeConn(raw io.ReadWriteCloser, target string) (err error) {
 	defer raw.Close()
-	conn, err := c.pullConn()
+	piper, err := c.DialPiper(target, c.BufferSize)
+	if err == nil {
+		err = piper.PipeConn(raw, target)
+	}
+	// fmt.Printf("piper conn is done by %v\n", err)
+	return
+}
+
+//DialPiper is xio.PiperDialer implement for create xio.Piper on client
+func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err error) {
+	var conn *ChannelConn
+	var back []byte
+	for i := 0; i < c.TryMax; i++ {
+		if i > 0 {
+			time.Sleep(c.TryDelay)
+		}
+		conn, err = c.pullConn()
+		if err != nil {
+			DebugLog("Client try pull connection fail with %v", err)
+			continue
+		}
+		DebugLog("Client try dial to %v", target)
+		_, err = conn.WriteFrame(append([]byte{0, 0, 0, 0, CmdConnDial}, []byte(target)...))
+		if err != nil {
+			conn.Close()
+			DebugLog("Client try dial to %v fail with %v", target, err)
+			continue
+		}
+		back, err = conn.ReadFrame()
+		if err != nil {
+			conn.Close()
+			DebugLog("Client try dial to %v fail with %v", target, err)
+			continue
+		}
+		break
+	}
 	if err != nil {
 		return
 	}
-	DebugLog("Client try proxy %v to %v for %v", raw, conn, target)
-	_, err = conn.WriteCmd(append([]byte{0, 0, 0, 0, CmdConnDial}, []byte(target)...))
-	if err != nil {
-		conn.SetErr(err)
-		conn.Close()
-		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
-		return
-	}
-	back, err := conn.ReadCmd()
-	if err != nil {
-		conn.SetErr(err)
-		conn.Close()
-		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
-		return
-	}
-	if back[0] != CmdConnBack {
-		err = fmt.Errorf("protocol error, expected back command, but %x", back[0])
+	if back[4] != CmdConnBack {
+		err = fmt.Errorf("protocol error, expected back command, but %x", back[4])
 		WarnLog("Client will close connection(%v) by %v", conn, err)
-		conn.SetErr(err)
 		conn.Close()
-		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
+		DebugLog("Client try dial to %v fail with %v", target, err)
 		return
 	}
-	backMessage := string(back[1:])
+	backMessage := string(back[5:])
 	if backMessage != "ok" {
 		err = fmt.Errorf("%v", backMessage)
 		c.pushConn(conn)
-		DebugLog("Client try proxy %v to %v for %v fail with %v", raw, conn, target, err)
+		DebugLog("Client try dial to %v fail with %v", target, err)
 		return
 	}
-	DebugLog("Client start transfer %v to %v for %v", raw, conn, target)
-	c.procRemote(conn, raw)
-	DebugLog("Client stop transfer %v to %v for %v", raw, conn, target)
-	if conn.PreErr() != nil {
-		InfoLog("Client the channel(%v) is stopped by %v", conn, conn.PreErr())
-		err = conn.PreErr()
-		conn.Close()
-	} else {
-		c.pushConn(conn)
+	conn.Using = target
+	DebugLog("Client dial to %v success on %v", target, conn)
+	piper = &piperConn{
+		conn:   conn,
+		client: c,
 	}
 	return
 }
 
-//procRemote will tansfer data between channel Conn and target connection.
-func (c *Client) procRemote(conn Conn, target io.ReadWriteCloser) (err error) {
-	wait := sync.WaitGroup{}
-	wait.Add(1)
-	go func() {
-		copyChannel2Remote(conn, target)
-		wait.Done()
-	}()
-	err = copyRemote2Channel(c.BufferSize, conn, target)
-	wait.Wait()
+type piperConn struct {
+	conn   *ChannelConn
+	client *Client
+	closed int32
+}
+
+func (p *piperConn) PipeConn(raw io.ReadWriteCloser, target string) (err error) {
+	DebugLog("Client start transfer %v to %v for %v", xio.RemoteAddr(raw), p.conn, target)
+	err = p.conn.PipeTo(raw)
+	DebugLog("Client stop transfer %v to %v for %v", xio.RemoteAddr(raw), p.conn, target)
+	p.Close()
 	return
 }
 
-//HTTPGet will do http get request by proxy
-func (c *Client) HTTPGet(uri string) (data []byte, err error) {
-	resp, err := c.HTTPClient.Get(uri)
-	if err == nil {
-		data, err = ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
+func (p *piperConn) Close() (err error) {
+	if !atomic.CompareAndSwapInt32(&p.closed, 0, 1) {
+		return
+	}
+	if p.conn.Error != nil {
+		InfoLog("Client the channel(%v) is stopped by %v", p.conn, p.conn.Error)
+		err = p.conn.Error
+		p.conn.Close()
+	} else {
+		p.conn.Using = ""
+		p.client.pushConn(p.conn)
 	}
 	return
 }
