@@ -505,3 +505,78 @@ func (p *PACDialer) DialPiper(target string, bufferSize int) (raw xio.Piper, err
 func (p *PACDialer) String() string {
 	return "PACDialer"
 }
+
+//AutoPACDialer prover dialer follow dial proxy auto when dial direct is error
+type AutoPACDialer struct {
+	Proxy     xio.PiperDialer
+	Direct    xio.PiperDialer
+	cache     map[string]int //cache for using proxy cache
+	cacheLock sync.RWMutex
+}
+
+//NewAutoPACDialer will create new AutoPACDialer
+func NewAutoPACDialer(proxy, direct xio.PiperDialer) (pac *AutoPACDialer) {
+	pac = &AutoPACDialer{
+		Proxy:     proxy,
+		Direct:    direct,
+		cache:     map[string]int{},
+		cacheLock: sync.RWMutex{},
+	}
+	return
+}
+
+//SaveCache will save cache to filename
+func (p *AutoPACDialer) SaveCache(filename string) (err error) {
+	p.cacheLock.RLock()
+	err = WriteJSON(filename, p.cache)
+	p.cacheLock.RUnlock()
+	InfoLog("AutoPACDialer save cache to %v with %v", filename, err)
+	return
+}
+
+//LoadCache will load cache from filename
+func (p *AutoPACDialer) LoadCache(filename string) (err error) {
+	p.cacheLock.Lock()
+	err = ReadJSON(filename, &p.cache)
+	p.cacheLock.Unlock()
+	InfoLog("AutoPACDialer load cache from %v with %v", filename, err)
+	return
+}
+
+//DialPiper will dial by pac
+func (p *AutoPACDialer) DialPiper(target string, bufferSize int) (raw xio.Piper, err error) {
+	hostname := target
+	if strings.Contains(target, "://") {
+		var u *url.URL
+		u, err = url.Parse(target)
+		if err != nil {
+			return
+		}
+		hostname = u.Hostname()
+	}
+	proxy := 0
+	ok := false
+	p.cacheLock.RLock()
+	proxy, ok = p.cache[hostname]
+	p.cacheLock.RUnlock()
+	if proxy < 1 {
+		DebugLog("AutoPACDialer try follow direct(%v) by %v", p.Direct, target)
+		raw, err = p.Direct.DialPiper(target, bufferSize)
+		if err == nil {
+			return
+		}
+	}
+	DebugLog("AutoPACDialer try follow proxy(%v) by %v", p.Proxy, target)
+	raw, err = p.Proxy.DialPiper(target, bufferSize)
+	if err == nil && !ok {
+		p.cacheLock.Lock()
+		p.cache[hostname] = 1
+		p.cacheLock.Unlock()
+		InfoLog("AutoPACDialer add %v to proxy cache", hostname)
+	}
+	return
+}
+
+func (p *AutoPACDialer) String() string {
+	return "AutoPACDialer"
+}

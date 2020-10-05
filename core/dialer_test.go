@@ -277,3 +277,63 @@ func TestPACDialer(t *testing.T) {
 	fmt.Printf("%v\n", proxy.String())
 	proxy.DialPiper("tcp://%2f", 1024)
 }
+
+func TestAutoPACDialer(t *testing.T) {
+	var proxy *AutoPACDialer
+	echo := xio.NewEchoDialer()
+	directc := 0
+	proxy = NewAutoPACDialer(echo, xio.PiperDialerF(func(target string, bufferSize int) (raw xio.Piper, err error) {
+		if target == "tcp://proxy" && directc == 0 {
+			err = fmt.Errorf("error")
+			directc++
+			return
+		}
+		if directc == 1 {
+			panic("error")
+		}
+		return
+	}))
+	raw, err := proxy.DialPiper("tcp://proxy", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
+	}
+	raw, err = proxy.DialPiper("tcp://proxy", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
+	}
+	err = proxy.SaveCache("/tmp/pac.cache")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	//load
+	proxy = NewAutoPACDialer(echo, xio.PiperDialerF(func(target string, bufferSize int) (raw xio.Piper, err error) {
+		panic("error")
+	}))
+	err = proxy.LoadCache("/tmp/pac.cache")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	raw, err = proxy.DialPiper("tcp://proxy", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
+	}
+	//
+	proxy = NewAutoPACDialer(nil, echo)
+	raw, err = proxy.DialPiper("tcp://local", 1024)
+	if err != nil || raw == nil {
+		t.Error(err)
+		return
+	}
+	//
+	_, err = proxy.DialPiper("tcp://%2f", 1024)
+	if err == nil {
+		t.Error(err)
+		return
+	}
+	fmt.Println(proxy.String())
+}
