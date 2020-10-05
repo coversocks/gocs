@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/coversocks/gocs"
 	"github.com/coversocks/gocs/core"
@@ -43,10 +44,12 @@ func main() {
 		go handlerServerKill()
 		gocs.StartServer(argConf)
 		gocs.WaitServer()
+		time.Sleep(300 * time.Millisecond)
 	} else if argRunClient {
 		go handlerClientKill()
 		gocs.StartClient(argConf)
 		gocs.WaitClient()
+		time.Sleep(300 * time.Millisecond)
 	} else {
 		flag.Usage()
 	}

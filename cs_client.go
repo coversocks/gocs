@@ -93,6 +93,7 @@ type Client struct {
 	Dialer     core.Dialer
 	Server     *proxy.Server
 	AutoServer *proxy.Server
+	AutoDialer *core.AutoPACDialer
 	Manager    *http.Server
 	Listener   net.Listener
 }
@@ -202,7 +203,11 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	}
 	//
 	// socksProxy.
-	parts := strings.SplitN(c.Conf.ProxyAddr, ":", -1)
+	proxyAddr := c.Conf.ProxyAddr
+	if len(c.Conf.AutoProxyAddr) > 0 {
+		proxyAddr = c.Conf.AutoProxyAddr
+	}
+	parts := strings.SplitN(proxyAddr, ":", -1)
 	abpStr = strings.Replace(abpStr, "__SOCKS5ADDR__", "127.0.0.1", -1)
 	abpStr = strings.Replace(abpStr, "__SOCKS5PORT__", parts[len(parts)-1], -1)
 	res.Write([]byte(abpStr))
@@ -299,11 +304,14 @@ func (c *Client) Start() (err error) {
 	gfw := core.NewGFW()
 	gfw.Set(strings.Join(rules, "\n"), core.GfwProxy)
 	directProcessor := core.NewNetDialer("", "")
-	pacProcessor := core.NewPACDialer(client, directProcessor)
+	autoProcessor := core.NewAutoPACDialer(client, directProcessor)
+	pacProcessor := core.NewPACDialer(client, autoProcessor)
 	pacProcessor.Check = gfw.IsProxy
 	pacProcessor.Mode = "auto"
 	c.Server = proxy.NewServer(client)
 	c.AutoServer = proxy.NewServer(pacProcessor)
+	c.AutoDialer = autoProcessor
+	c.AutoDialer.LoadCache(filepath.Join(c.WorkDir, "pac.cache"))
 	err = c.Server.Start(conf.ProxyAddr)
 	if err != nil {
 		ErrorLog("Client start proxy server fail with %v", err)
@@ -356,16 +364,19 @@ func (c *Client) Wait() {
 //Stop will stop running client
 func (c *Client) Stop() {
 	InfoLog("Client stopping client listener")
+	if c.AutoDialer != nil {
+		c.AutoDialer.SaveCache(filepath.Join(c.WorkDir, "pac.cache"))
+	}
+	c.Close()
+	if c.Manager != nil {
+		c.Listener.Close()
+	}
 	if c.Server != nil {
 		c.Server.Close()
 	}
 	if c.AutoServer != nil {
 		c.AutoServer.Close()
 	}
-	if c.Manager != nil {
-		c.Manager.Close()
-	}
-	c.Close()
 }
 
 func parseConnAddr(addr string) (addrs []string, err error) {
