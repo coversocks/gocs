@@ -41,13 +41,21 @@ func main() {
 	if argRunVersion {
 		fmt.Printf("%v\n", version)
 	} else if argRunServer {
+		err := gocs.StartServer(argConf)
+		if err != nil {
+			fmt.Printf("start server fail with %v\n", err)
+			os.Exit(1)
+		}
 		go handlerServerKill()
-		gocs.StartServer(argConf)
 		gocs.WaitServer()
 		time.Sleep(300 * time.Millisecond)
 	} else if argRunClient {
+		err := gocs.StartClient(argConf)
+		if err != nil {
+			fmt.Printf("start client fail with %v\n", err)
+			os.Exit(1)
+		}
 		go handlerClientKill()
-		gocs.StartClient(argConf)
 		gocs.WaitClient()
 		time.Sleep(300 * time.Millisecond)
 	} else {

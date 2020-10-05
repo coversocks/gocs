@@ -83,7 +83,7 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 }
 
 func (s *Server) httpStart() (err error) {
-	InfoLog("Server start http server on %v", s.Conf.HTTPAddr)
+	InfoLog("Server starting http server on %v", s.Conf.HTTPAddr)
 	addrs, err := parseListenAddr(s.Conf.HTTPAddr)
 	if err != nil {
 		ErrorLog("Server start http server on %v fail with %v", s.Conf.HTTPAddr, err)
@@ -93,11 +93,12 @@ func (s *Server) httpStart() (err error) {
 	for _, a := range addrs {
 		go s.runServer(a, nil)
 	}
+	InfoLog("Server http server on %v is started", s.Conf.HTTPSAddr)
 	return
 }
 
 func (s *Server) httpsStart() (err error) {
-	InfoLog("Server start https server on %v", s.Conf.HTTPSAddr)
+	InfoLog("Server starting https server on %v", s.Conf.HTTPSAddr)
 	addrs, err := parseListenAddr(s.Conf.HTTPSAddr)
 	if err != nil {
 		ErrorLog("Server start https server on %v fail with %v", s.Conf.HTTPSAddr, err)
@@ -109,6 +110,7 @@ func (s *Server) httpsStart() (err error) {
 		cert, _ = xcrypto.GenerateRSA(s.Conf.HTTPSLen)
 		go s.runServer(addr, &cert)
 	}
+	InfoLog("Server https server on %v is started", s.Conf.HTTPSAddr)
 	return
 }
 
@@ -186,6 +188,10 @@ func (s *Server) Start() (err error) {
 	s.mux.HandleFunc("/manager/", s.auth.ListUser)
 	s.mux.HandleFunc("/manager/addUser", s.auth.AddUser)
 	s.mux.HandleFunc("/manager/removeUser", s.auth.RemoveUser)
+	if len(s.Conf.HTTPAddr) < 1 && len(s.Conf.HTTPSAddr) < 1 {
+		err = fmt.Errorf("http_addr and https_addr is empty")
+		return
+	}
 	if len(s.Conf.HTTPAddr) > 0 {
 		s.httpStart()
 	}
