@@ -42,9 +42,11 @@ func main() {
 	} else if argRunServer {
 		go handlerServerKill()
 		gocs.StartServer(argConf)
+		gocs.WaitServer()
 	} else if argRunClient {
 		go handlerClientKill()
 		gocs.StartClient(argConf)
+		gocs.WaitClient()
 	} else {
 		flag.Usage()
 	}

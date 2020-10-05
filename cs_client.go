@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/codingeasygo/util/proxy"
+	proxyhttp "github.com/codingeasygo/util/proxy/http"
+	proxysocks "github.com/codingeasygo/util/proxy/socks"
 
 	"github.com/codingeasygo/util/xio"
 	"github.com/coversocks/gocs/core"
@@ -265,8 +267,6 @@ func (c *Client) Start() (err error) {
 		err = fmt.Errorf("Client proxy_addr is required")
 		return
 	}
-	// clientConf = c
-	// clientConfDir = filepath.Dir(clientConf)
 	var workDir = filepath.Dir(c.ConfPath)
 	if len(conf.WorkDir) > 0 {
 		if filepath.IsAbs(conf.WorkDir) {
@@ -276,9 +276,11 @@ func (c *Client) Start() (err error) {
 		}
 		workDir, _ = filepath.Abs(workDir)
 	}
-	core.SetLogLevel(conf.LogLevel)
-	InfoLog("Client using config from %v, work on %v", c, workDir)
 	c.Conf, c.WorkDir = conf, workDir
+	InfoLog("Client using config from %v, work on %v, log level %v", c.ConfPath, workDir, c.Conf.LogLevel)
+	core.SetLogLevel(c.Conf.LogLevel)
+	proxysocks.SetLogLevel(c.Conf.LogLevel)
+	proxyhttp.SetLogLevel(c.Conf.LogLevel)
 	err = client.Boostrap(c.Dialer)
 	if err != nil {
 		ErrorLog("Client bootstrap fail with %v", err)
@@ -316,7 +318,6 @@ func (c *Client) Start() (err error) {
 		InfoLog("Client start auto socks server on %v with mode %v", conf.AutoProxyAddr, pacProcessor.Mode)
 	}
 	InfoLog("Client start proxy server on %v", conf.ProxyAddr)
-	c.ChangeProxyMode(conf.Mode)
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pac.js", client.PACH)
@@ -338,9 +339,18 @@ func (c *Client) Start() (err error) {
 			WarnLog("Client the web server on %v is stopped by %v", conf.ManagerAddr, xerr)
 		}()
 	}
-	InfoLog("Client all listener is stopped")
-	c.ChangeProxyMode("manual")
+	c.ChangeProxyMode(conf.Mode)
 	return
+}
+
+//Wait will wait all runner
+func (c *Client) Wait() {
+	if c.Server != nil {
+		c.Server.Wait()
+	}
+	if c.AutoServer != nil {
+		c.AutoServer.Wait()
+	}
 }
 
 //Stop will stop running client
@@ -373,6 +383,7 @@ func parseConnAddr(addr string) (addrs []string, err error) {
 func (c *Client) ChangeProxyMode(mode string) (message string, err error) {
 	if c.Server == nil || c.Manager == nil {
 		err = fmt.Errorf("proxy server is not started")
+		WarnLog("change proxy mode to %v fail with %v", mode, err)
 		return
 	}
 	proxyServerParts := strings.Split(c.Conf.ProxyAddr, ":")
@@ -402,6 +413,13 @@ var client *Client
 func StartClient(c string) (err error) {
 	client = NewClient(c, core.NewWebsocketDialer())
 	return client.Start()
+}
+
+//WaitClient will wait all runner
+func WaitClient() {
+	if client != nil {
+		client.Wait()
+	}
 }
 
 //StopClient will stop running client

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	proxyhttp "github.com/codingeasygo/util/proxy/http"
+	proxysocks "github.com/codingeasygo/util/proxy/socks"
 	"github.com/codingeasygo/util/runner"
 	"github.com/codingeasygo/util/xcrypto"
 	"github.com/coversocks/gocs/core"
@@ -169,7 +171,10 @@ func (s *Server) ProcRestart() (err error) {
 //Start by configure path and raw dialer
 func (s *Server) Start() (err error) {
 	serverConfDir := filepath.Dir(s.ConfPath)
+	InfoLog("Server using config from %v, work on %v, log level %v", s.ConfPath, serverConfDir, s.Conf.LogLevel)
 	core.SetLogLevel(s.Conf.LogLevel)
+	proxysocks.SetLogLevel(s.Conf.LogLevel)
+	proxyhttp.SetLogLevel(s.Conf.LogLevel)
 	userFile := s.Conf.UserFile
 	if len(userFile) > 0 && !filepath.IsAbs(userFile) {
 		userFile, _ = filepath.Abs(filepath.Join(serverConfDir, userFile))
@@ -188,6 +193,11 @@ func (s *Server) Start() (err error) {
 		s.httpsStart()
 	}
 	return
+}
+
+//Wait will wait all runner is stopped
+func (s *Server) Wait() {
+	s.waiter.Wait()
 }
 
 //Stop will stop running server
@@ -223,6 +233,13 @@ func StartServer(c string) (err error) {
 	server = NewServer(c, conf, core.NewNetDialer("", conf.DNSServer))
 	err = server.Start()
 	return
+}
+
+//WaitServer will wait server
+func WaitServer() {
+	if server != nil {
+		server.waiter.Wait()
+	}
 }
 
 //StopServer will stop server

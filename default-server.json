@@ -6,5 +6,6 @@
     "manager": {
         "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
     },
-    "user_file": "default-user.json"
+    "user_file": "default-user.json",
+    "log": 40
 }
