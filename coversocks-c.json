@@ -4,7 +4,7 @@
             "enable": true,
             "name": "test1",
             "address": [
-                "wss://127.0.0.1:5200/ds?skip_verify=1"
+                "wss://127.0.0.1:5200/cover?skip_verify=1"
             ],
             "username": "test",
             "password": "123"

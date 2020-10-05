@@ -36,8 +36,8 @@ systemctl status coversocks
 * start proxy by `./run.sh` on linux/osx, `run.bat` on windows
 * test proxy by
 ```.sh
-export http_proxy=http://127.0.0.1:1103
-export https_proxy=http://127.0.0.1:1103
+export http_proxy=http://127.0.0.1:1105
+export https_proxy=http://127.0.0.1:1105
 export socks_proxy=socks5://127.0.0.1:1105
 curl https://www.google.com
 ```
@@ -45,20 +45,20 @@ curl https://www.google.com
 ### Configure(Server)
 ```.json
 {
-    "http_listen_addr": "",
-    "https_listen_addr": ":5200",
-    "https_cert": "cscert.crt",
-    "https_key": "cscert.key",
+    "http_addr": "",
+    "https_addr": ":5200",
+    "https_gen": 300000,
+    "https_len": 2048,
     "manager": {
         "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
     },
     "user_file": "dsuser.json"
 }
 ```
-* `http_listen_addr` the http listen address, it alway is used when run coversocks behind reverse proxy server like nginx/httpd
-* `https_listen_addr` the https listen address, it can be connected direct by coversocks client
-* `https_cert` the https cert
-* `https_key` the https cert key
+* `http_addr` the http listen address, it alway is used when run coversocks behind reverse proxy server like nginx/httpd
+* `https_addr` the https listen address, it can be connected direct by coversocks client
+* `https_gen` the https cert gen delay
+* `https_len` the https cert key length
 * `manager` the manager user list, the key is username, the value is password which is encrypted by sha1, create it by `echo -n xxxx | sha1sum`
 * `user_file` the access user list by json key/value, the key is username, the value is password which is encrypted by sha1, create it by `echo -n xxxx | sha1sum`
 
@@ -70,14 +70,14 @@ curl https://www.google.com
             "enable": true,
             "name": "test1",
             "address": [
-                "wss://127.0.0.1:5200/ds?skip_verify=1"
+                "wss://127.0.0.1:5200/cover?skip_verify=1"
             ],
             "username": "test",
             "password": "123"
         }
     ],
-    "socks_addr": "0.0.0.0:1105",
-    "http_addr": "0.0.0.0:1103",
+    "proxy_addr": "0.0.0.0:1105",
+    "auto_proxy_addr": "0.0.0.0:1104",
     "manager_addr": "0.0.0.0:1101",
     "mode": "auto"
 }
@@ -87,8 +87,8 @@ curl https://www.google.com
 * `servers.address` the server websocks address,
 * `servers.username` the username to server,
 * `servers.password` the password to login server,
-* `socks_addr` the socks5 proxy server listen address
-* `http_addr` the http/https proxy server listen address
+* `proxy_addr` the socks5/http/https proxy server listen address
+* `auto_proxy_addr` the auto mode socks5/http/https proxy server listen address
 * `manager_addr` the auto proxy url listen address (pac)
 * `mode` the proxy mode which can be `manual/auto/global`
 
@@ -96,15 +96,15 @@ curl https://www.google.com
 * for osx and linux
 ```.sh
 #get source code
-go get github.com/coversocks/golang/csocks
+go get github.com/coversocks/gocs/csocks
 #package binary
-cd $GOPATH/src/github.com/coversocks/golang
+cd $GOPATH/src/github.com/coversocks/gocs
 ./pkg.sh
 ```
 * for windows
 ```.bat
-go get github.com/coversocks/golang/csocks
-cd $GOPATH\src\github.com\coversocks\golang
+go get github.com/coversocks/gocs/csocks
+cd $GOPATH\src\github.com\coversocks\gocs
 pkg 386
 pkg amd64
 ```
