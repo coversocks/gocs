@@ -22,7 +22,6 @@ xcopy sysproxy.exe /F build\%srv_name%
 xcopy sysproxy64.exe /F build\%srv_name%
 xcopy gfwlist.txt /F build\%srv_name%
 xcopy abp.js /F build\%srv_name%
-echo F | xcopy privoxy-Win.exe /F /Y build\%srv_name%\privoxy.exe
 
 
 if NOT %ERRORLEVEL% EQU 0 goto :efail
