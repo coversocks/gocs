@@ -46,7 +46,7 @@ curl https://www.google.com
 ```.json
 {
     "http_addr": "",
-    "https_addr": ":5200",
+    "https_addr": ":5200-5210",
     "https_gen": 300000,
     "https_len": 2048,
     "manager": {
@@ -70,7 +70,7 @@ curl https://www.google.com
             "enable": true,
             "name": "test1",
             "address": [
-                "wss://127.0.0.1:5200/cover?skip_verify=1"
+                "wss://127.0.0.1:5200-5210/cover?skip_verify=1"
             ],
             "username": "test",
             "password": "123"

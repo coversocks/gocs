@@ -1,6 +1,6 @@
 {
     "http_addr": "",
-    "https_addr": ":5200",
+    "https_addr": ":5200-5210,:11200-11210",
     "https_gen": 300000,
     "https_len": 2048,
     "manager": {
