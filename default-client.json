@@ -10,9 +10,9 @@
             "password": "123"
         }
     ],
-    "proxy_addr": "0.0.0.0:1105",
-    "auto_proxy_addr": "0.0.0.0:1104",
-    "manager_addr": "0.0.0.0:1101",
+    "proxy_addr": "127.0.0.1:1105",
+    "auto_proxy_addr": "127.0.0.1:1104",
+    "manager_addr": "127.0.0.1:1101",
     "mode": "auto",
     "log": 40
 }

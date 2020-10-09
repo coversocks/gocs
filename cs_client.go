@@ -317,6 +317,7 @@ func (c *Client) Start() (err error) {
 		ErrorLog("Client start proxy server fail with %v", err)
 		return
 	}
+	InfoLog("Client start proxy server on %v", conf.ProxyAddr)
 	if len(conf.AutoProxyAddr) > 0 {
 		err = c.AutoServer.Start(conf.AutoProxyAddr)
 		if err != nil {
@@ -325,7 +326,6 @@ func (c *Client) Start() (err error) {
 		}
 		InfoLog("Client start auto socks server on %v with mode %v", conf.AutoProxyAddr, pacProcessor.Mode)
 	}
-	InfoLog("Client start proxy server on %v", conf.ProxyAddr)
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pac.js", client.PACH)
