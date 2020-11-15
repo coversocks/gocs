@@ -312,14 +312,14 @@ func (c *Client) Start() (err error) {
 	c.AutoServer = proxy.NewServer(pacProcessor)
 	c.AutoDialer = autoProcessor
 	c.AutoDialer.LoadCache(filepath.Join(c.WorkDir, "pac.cache"))
-	err = c.Server.Start(conf.ProxyAddr)
+	_, err = c.Server.Start(conf.ProxyAddr)
 	if err != nil {
 		ErrorLog("Client start proxy server fail with %v", err)
 		return
 	}
 	InfoLog("Client start proxy server on %v", conf.ProxyAddr)
 	if len(conf.AutoProxyAddr) > 0 {
-		err = c.AutoServer.Start(conf.AutoProxyAddr)
+		_, err = c.AutoServer.Start(conf.AutoProxyAddr)
 		if err != nil {
 			ErrorLog("Client start auto proxy server fail with %v", err)
 			return
