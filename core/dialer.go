@@ -68,11 +68,33 @@ func (r *RawDialerWrapper) Dial(remote string) (raw io.ReadWriteCloser, err erro
 	return
 }
 
+//AliasURI is interface to find really uri
+type AliasURI interface {
+	Find(target string) (string, error)
+}
+
+//MapAliasURI is implement alias uri
+type MapAliasURI map[string]string
+
+//Find really uri
+func (m MapAliasURI) Find(target string) (remote string, err error) {
+	u, err := url.Parse(target)
+	if err != nil {
+		return
+	}
+	remote, ok := m[u.Host]
+	if !ok {
+		remote = target
+	}
+	return
+}
+
 //NetDialer is an implementation of Dialer by net
 type NetDialer struct {
-	DNS string
-	UDP RawDialer
-	TCP RawDialer
+	DNS   string
+	UDP   RawDialer
+	TCP   RawDialer
+	Alias AliasURI
 }
 
 //NewNetDialer will create new NetDialer
@@ -103,7 +125,14 @@ func NewNetDialer(bind, dns string) (dialer *NetDialer) {
 
 //Dial dial to remote by net
 func (n *NetDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
-	DebugLog("NetDialer dial to %v", remote)
+	target := remote
+	if n.Alias != nil {
+		remote, err = n.Alias.Find(target)
+	}
+	if err != nil {
+		return
+	}
+	DebugLog("NetDialer dial to %v, really is %v", target, remote)
 	if strings.Contains(remote, "://") {
 		var u *url.URL
 		u, err = url.Parse(remote)
@@ -111,6 +140,8 @@ func (n *NetDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 			return
 		}
 		switch u.Scheme {
+		case "echo":
+			raw = xio.NewEchoConn()
 		case "dns":
 			raw, err = n.UDP.Dial("udp", n.DNS)
 			// if err == nil {

@@ -28,6 +28,7 @@ type ServerConf struct {
 	UserFile  string            `json:"user_file"`
 	LogLevel  int               `json:"log"`
 	DNSServer string            `json:"dns_server"`
+	Alias     core.MapAliasURI  `json:"alias"`
 }
 
 type httpServer struct {
@@ -236,7 +237,9 @@ func StartServer(c string) (err error) {
 		ErrorLog("Server read configure from %v fail with %v", c, err)
 		return
 	}
-	server = NewServer(c, conf, core.NewNetDialer("", conf.DNSServer))
+	dialer := core.NewNetDialer("", conf.DNSServer)
+	dialer.Alias = conf.Alias
+	server = NewServer(c, conf, dialer)
 	err = server.Start()
 	return
 }
