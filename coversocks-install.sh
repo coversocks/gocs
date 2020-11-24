@@ -10,6 +10,9 @@ installServer(){
   if [ ! -f /etc/systemd/system/coversocks.service ];then
     cp -f coversocks.service /etc/systemd/system/
   fi
+  if [ -f udpgw.service ] && [ ! -f /etc/systemd/system/udpgw.service ];then
+    cp -f udpgw.service /etc/systemd/system/
+  fi
   mkdir -p /home/cs/conf/
   if [ ! -f /home/cs/conf/coversocks.json ];then
     cp -f default-server.json /home/cs/conf/coversocks.json
@@ -22,6 +25,7 @@ installServer(){
     /home/cs/coversocks/cert.sh /home/cs/conf/
   fi
   systemctl enable coversocks.service
+  systemctl enable udpgw.service
 }
 
 case "$1" in

@@ -6,6 +6,9 @@
     "manager": {
         "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
     },
+    "alias": {
+        "udpgw": "tcp://127.0.0.1:13200"
+    },
     "user_file": "default-user.json",
     "log": 40
 }

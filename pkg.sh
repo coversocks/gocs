@@ -6,7 +6,7 @@ set -e
 export cpwd=`pwd`
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib
 export PATH=$PATH:$GOPATH/bin:$HOME/bin:$GOROOT/bin
-output=build
+output=$cpwd/build
 
 
 #### Package ####
@@ -27,6 +27,15 @@ cp -f gfwlist.txt $srv_out
 cp -f abp.js $srv_out
 cp -f networksetup-*.sh $srv_out
 cp -f run.sh $srv_out
+if [ "$UDPGW_DIR" != "" ];then
+    cp -f udpgw.service $srv_out
+    cd $UDPGW_DIR
+    mkdir -p build
+    cd build
+    cmake ..
+    make badvpn-udpgw
+    cp -f udpgw/badvpn-udpgw $srv_out/udpgw
+fi
 
 ###
 cd $output
