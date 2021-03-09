@@ -14,5 +14,6 @@
     "auto_proxy_addr": "127.0.0.1:1104",
     "manager_addr": "127.0.0.1:1101",
     "mode": "auto",
+    "pprof":1,
     "log": 40
 }

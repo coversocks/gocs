@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -82,6 +83,7 @@ type ClientConf struct {
 	Mode          string              `json:"mode"`
 	LogLevel      int                 `json:"log"`
 	WorkDir       string              `json:"work_dir"`
+	PPROF         int                 `json:"pprof"`
 }
 
 //Client is dialer by ClientConf
@@ -332,6 +334,13 @@ func (c *Client) Start() (err error) {
 		mux.HandleFunc("/changeProxyMode", client.ChangeProxyModeH)
 		mux.HandleFunc("/updateGfwlist", client.UpdateGfwlistH)
 		mux.HandleFunc("/state", client.StateH)
+		if conf.PPROF == 1 {
+			mux.HandleFunc("/debug/pprof/", pprof.Index)
+			mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		}
 		var listener net.Listener
 		c.Manager = &http.Server{Addr: conf.ManagerAddr, Handler: mux}
 		listener, err = net.Listen("tcp", conf.ManagerAddr)
