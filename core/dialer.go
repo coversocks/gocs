@@ -33,6 +33,15 @@ func (d DialerF) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 	return
 }
 
+//DialPiper is xio.PiperDialer implement by dial raw by net dailer
+func (d DialerF) DialPiper(target string, bufferSize int) (piper xio.Piper, err error) {
+	raw, err := d(target)
+	if err == nil {
+		piper = xio.NewCopyPiper(raw, bufferSize)
+	}
+	return
+}
+
 //RawDialer is an interface to dial raw conenction
 type RawDialer interface {
 	Dial(network, address string) (net.Conn, error)

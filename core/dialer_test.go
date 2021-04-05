@@ -97,8 +97,9 @@ func TestWebsocketDialer(t *testing.T) {
 }
 
 func TestNetDialer(t *testing.T) {
-	dialer := NewNetDialer("", "114.114.114.114:53")
-	_, err := dialer.Dial("tcp://127.0.0.1:80")
+	ts := httptest.NewServer(nil)
+	dialer := NewNetDialer("", "192.168.1.1:53")
+	_, err := dialer.Dial("tcp://" + strings.TrimPrefix(ts.URL, "http://"))
 	if err != nil {
 		t.Error(err)
 		return

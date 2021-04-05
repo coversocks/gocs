@@ -3,7 +3,6 @@ package gocs
 import (
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,9 @@ import (
 	proxysocks "github.com/codingeasygo/util/proxy/socks"
 	"github.com/codingeasygo/util/runner"
 	"github.com/codingeasygo/util/xcrypto"
+	"github.com/codingeasygo/util/xio"
 	"github.com/coversocks/gocs/core"
+	"github.com/coversocks/gocs/udpgw"
 	"golang.org/x/net/websocket"
 )
 
@@ -40,7 +41,7 @@ type httpServer struct {
 type Server struct {
 	ConfPath    string
 	Conf        ServerConf
-	Dialer      core.Dialer
+	Dialer      xio.PiperDialer
 	Server      *core.Server
 	servers     map[string]*httpServer
 	serversLock sync.RWMutex
@@ -50,7 +51,7 @@ type Server struct {
 }
 
 //NewServer will return new Server
-func NewServer(confPath string, conf ServerConf, dialer core.Dialer) (server *Server) {
+func NewServer(confPath string, conf ServerConf, dialer xio.PiperDialer) (server *Server) {
 	server = &Server{
 		ConfPath:    confPath,
 		Conf:        conf,
@@ -68,8 +69,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 //Dial will dial remote by Dialer
-func (s *Server) Dial(remote string) (raw io.ReadWriteCloser, err error) {
-	raw, err = s.Dialer.Dial(remote)
+func (s *Server) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error) {
+	if uri == "tcp://udpgw" {
+		raw = udpgw.NewUDPGW()
+	} else {
+		raw, err = s.Dialer.DialPiper(uri, bufferSize)
+	}
 	return
 }
 
@@ -247,7 +252,7 @@ func StartServer(c string) (err error) {
 //WaitServer will wait server
 func WaitServer() {
 	if server != nil {
-		server.waiter.Wait()
+		server.Wait()
 	}
 }
 

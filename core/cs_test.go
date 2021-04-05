@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/codingeasygo/util/xio"
 
+	"net/http/httptest"
 	_ "net/http/pprof"
 )
 
@@ -51,6 +51,7 @@ func TestCoversocket(t *testing.T) {
 			DebugLog("test client dial to %v success", remote)
 			return
 		}))
+		client.MaxIdle = 0
 		wait.Add(1)
 		go func() {
 			client.PipeConn(clientConn, "test")
@@ -78,7 +79,67 @@ func TestCoversocket(t *testing.T) {
 		client.Close()
 		time.Sleep(time.Millisecond)
 		serverChannel.Close()
+		server.Close()
+		wait.Wait()
 		fmt.Println("---->normal process done")
+	}
+	{ //push pull
+		var n int
+		message := "test..."
+		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+			DebugLog("test server dial to %v success", remote)
+			raw = xio.NewPipedChan()
+			return
+		}))
+		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+			serverChannel, clientChannel, _ := xio.CreatePipedConn()
+			serverChannel.Alias, clientChannel.Alias = "ServerChannel", "ClientChannel"
+			raw = clientChannel
+			wait.Add(1)
+			go func() {
+				server.ProcConn(serverChannel)
+				wait.Done()
+			}()
+			DebugLog("test client dial to %v success", remote)
+			return
+		}))
+		client.MaxIdle = 0
+		//
+		clientConn1, clientRemote1, _ := xio.CreatePipedConn()
+		clientConn1.Alias, clientRemote1.Alias = "ClientConn1", "ClientRemote1"
+		wait.Add(1)
+		go func() {
+			client.PipeConn(clientConn1, "test")
+			wait.Done()
+		}()
+
+		clientRemote1.Write([]byte(message))
+		n, _ = clientRemote1.Read(buf)
+		if message != string(buf[0:n]) {
+			t.Error("error")
+			return
+		}
+		//
+		clientConn2, clientRemote2, _ := xio.CreatePipedConn()
+		clientConn2.Alias, clientRemote2.Alias = "ClientConn", "ClientRemote"
+		wait.Add(1)
+		go func() {
+			client.PipeConn(clientConn2, "test")
+			wait.Done()
+		}()
+		clientRemote2.Write([]byte(message))
+		clientRemote2.Read(buf)
+		if message != string(buf[0:n]) {
+			t.Error("error")
+			return
+		}
+		//
+		clientRemote1.Close()
+		time.Sleep(20 * time.Millisecond)
+		client.Close()
+		server.Close()
+		wait.Wait()
+		fmt.Println("---->push pull done")
 	}
 	{ //http process
 		//
@@ -93,7 +154,7 @@ func TestCoversocket(t *testing.T) {
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 			addr := strings.TrimPrefix(httpServer.URL, "http://")
 			raw, err = net.Dial("tcp", addr)
-			DebugLog("test server dial to %v", addr)
+			DebugLog("test server dial to %v by %v", addr, err)
 			return
 		}))
 		wait.Add(1)
@@ -119,6 +180,7 @@ func TestCoversocket(t *testing.T) {
 		time.Sleep(time.Millisecond)
 		fmt.Println("closing server channel")
 		serverChannel.Close()
+		wait.Wait()
 		fmt.Println("---->http process done")
 	}
 	{ //server dial error
@@ -174,6 +236,7 @@ func TestCoversocket(t *testing.T) {
 		//
 		time.Sleep(time.Millisecond)
 		serverChannel.Close()
+		wait.Wait()
 		fmt.Println("---->server dial error done")
 	}
 	{ //client dialer error
@@ -188,38 +251,41 @@ func TestCoversocket(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		wait.Wait()
 		fmt.Println("---->client dial error done")
 	}
 	{ //server proc error
+		var err error
 		remoteConn := NewErrMockConn(1, 1)
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 			raw = remoteConn
 			return
 		}))
-		//
+		//read command fail
 		procConn1 := NewErrMockConn(1, 1)
 		buf1 := make([]byte, 8)
 		binary.BigEndian.PutUint32(buf1, 8)
-		copy(buf1[4:], []byte("abcd"))
+		buf1[4] = 0
+		copy(buf1[5:], []byte("abc"))
 		procConn1.ReadData <- buf1
-		err := server.ProcConn(procConn1)
+		err = server.ProcConn(procConn1)
 		if err == nil {
 			t.Error(err)
 			return
 		}
-		//
-		procConn2 := NewErrMockConn(1, 2)
+		//not dial command fail
+		procConn2 := NewErrMockConn(1, 1)
 		buf2 := make([]byte, 8)
 		binary.BigEndian.PutUint32(buf2, 8)
-		buf2[4] = CmdConnDial
+		buf2[4] = CmdConnBack
 		copy(buf2[5:], []byte("abc"))
 		procConn2.ReadData <- buf2
-		procConn2.ReadErrC = 2
 		err = server.ProcConn(procConn2)
 		if err == nil {
 			t.Error(err)
 			return
 		}
+		wait.Wait()
 		fmt.Println("---->server proc error done")
 	}
 	{ //client proc error
@@ -237,7 +303,8 @@ func TestCoversocket(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		//read channe command error
+		fmt.Printf("read channel command error done\n")
+		//read channel command error
 		client = NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 			remoteConn := NewErrMockConn(1, 2)
 			remoteConn.ReadErrC = 1
@@ -251,7 +318,8 @@ func TestCoversocket(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		//channe command error
+		fmt.Printf("read channel command error done\n")
+		//dial back command error
 		client = NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 			remoteConn := NewErrMockConn(1, 2)
 			buf2 := make([]byte, 8)
@@ -269,30 +337,7 @@ func TestCoversocket(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		//data command error
-		client = NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
-			remoteConn := NewErrMockConn(1, 2)
-			buf2 := make([]byte, 8)
-			binary.BigEndian.PutUint32(buf2, 7)
-			buf2[4] = CmdConnBack
-			copy(buf2[5:], []byte("ok"))
-			remoteConn.ReadData <- buf2
-			remoteConn.ReadErrC = 2
-			raw = remoteConn
-			return
-		}))
-		client.TryDelay = time.Millisecond
-		clientConn = NewErrMockConn(1, 2)
-		err = client.PipeConn(clientConn, "test")
-		if err == nil {
-			t.Error(err)
-			return
-		}
-		// err := client.PipeConn(clientConn, "test")
-		// if err == nil || err.Error() != "error" {
-		// 	t.Error(err)
-		// 	return
-		// }
+		wait.Wait()
 		fmt.Println("---->client proc error done")
 	}
 	//
@@ -366,73 +411,6 @@ func (e *ErrMockConn) Reset() {
 	e.ReadErrC = 0
 	e.writed = 0
 	e.WriteErrC = 0
-}
-
-func TestCopyRemote2ChannelErr(t *testing.T) {
-	var target, conn *ErrMockConn
-	var err error
-	{
-		//
-		//target read error
-		target = NewErrMockConn(1, 1)
-		conn = NewErrMockConn(1, 2)
-		target.ReadErrC = 1
-		channel := NewChannelConn(conn, 1024)
-		err = channel.ReadFrom(target)
-		<-conn.WriteData
-		if err == nil {
-			t.Error(err)
-			return
-		}
-	}
-	{
-		//
-		//conn write error
-		target = NewErrMockConn(1, 1)
-		conn = NewErrMockConn(1, 2)
-		conn.WriteErrC = 1
-		target.ReadData <- []byte("test")
-		channel := NewChannelConn(conn, 1024)
-		channel.ReadFrom(target)
-		if err == nil {
-			t.Error(err)
-			return
-		}
-	}
-}
-
-func TestCopyChannel2RemoteErr(t *testing.T) {
-	var target, conn *ErrMockConn
-	var err error
-	{
-		//
-		//conn read error
-		target = NewErrMockConn(1, 1)
-		conn = NewErrMockConn(1, 1)
-		conn.ReadErrC = 1
-		channel := NewChannelConn(conn, 1024)
-		err = channel.WriteTo(target)
-		if err == nil {
-			t.Error(err)
-			return
-		}
-	}
-	{
-		//
-		//conn command error
-		target = NewErrMockConn(1, 1)
-		conn = NewErrMockConn(1, 1)
-		buf := make([]byte, 8)
-		binary.BigEndian.PutUint32(buf, 8)
-		copy(buf[4:], []byte("abcd"))
-		conn.ReadData <- buf
-		channel := NewChannelConn(conn, 1024)
-		err = channel.WriteTo(target)
-		if err == nil {
-			t.Error(err)
-			return
-		}
-	}
 }
 
 type chanBuffer struct {

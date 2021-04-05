@@ -13,7 +13,6 @@ echo "Installing Dependence"
 echo "Running Test"
 pkgs="\
  github.com/coversocks/gocs/core\
- github.com/coversocks/gocs\
 "
 
 if [ ! -f ./cscert.crt ];then

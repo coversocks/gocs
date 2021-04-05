@@ -56,6 +56,7 @@ func (b *bufferConn) Close() (err error) {
 }
 
 func TestProxy(t *testing.T) {
+	wait := &sync.WaitGroup{}
 	SetLogLevel(LogLevelDebug)
 	var err error
 	ts := httptest.NewServer(http.FileServer(http.Dir(".")))
@@ -70,11 +71,21 @@ func TestProxy(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	wait.Add(1)
+	go func() {
+		WaitServer()
+		wait.Done()
+	}()
 	err = StartClient("cs_test_client.json")
 	if err != nil {
 		t.Error(err)
 		return
 	}
+	wait.Add(1)
+	go func() {
+		WaitClient()
+		wait.Done()
+	}()
 	time.Sleep(300 * time.Millisecond)
 	echo := xio.NewEchoDialer()
 	server.Dialer.(*core.NetDialer).TCP = core.RawDialerF(func(network, address string) (net.Conn, error) {
@@ -129,7 +140,7 @@ func TestProxy(t *testing.T) {
 	//
 	//test error
 	gfwListURL = "http://127.0.0.1:3211"
-	res, err = xhttp.GetText("http://127.0.0.1:11101/updateGfwlist")
+	_, err = xhttp.GetText("http://127.0.0.1:11101/updateGfwlist")
 	if err == nil {
 		t.Error(err)
 		return
@@ -141,6 +152,8 @@ func TestProxy(t *testing.T) {
 	StopServer()
 	c.Client = nil
 	c.UpdateGfwlist()
+	fmt.Printf("client info %v\n", client)
+	wait.Wait()
 }
 
 type bufferConn2 struct {
