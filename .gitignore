@@ -16,3 +16,4 @@ netstack/netcsock/csocks.json
 netstack/*.pcap
 test/test
 csocks/csocks
+udpgw/server/server

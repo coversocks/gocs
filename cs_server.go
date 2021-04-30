@@ -99,7 +99,7 @@ func (s *Server) httpStart() (err error) {
 	for _, a := range addrs {
 		go s.runServer(a, nil)
 	}
-	InfoLog("Server http server on %v is started", s.Conf.HTTPSAddr)
+	InfoLog("Server http server on %v is started", s.Conf.HTTPAddr)
 	return
 }
 

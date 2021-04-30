@@ -28,6 +28,7 @@ type UDPConn struct {
 type UDPGW struct {
 	MTU      int
 	DNS      *net.UDPAddr
+	MaxConn  int
 	connList map[uint16]*UDPConn
 	connLock sync.RWMutex
 	timeout  bool
@@ -36,6 +37,7 @@ type UDPGW struct {
 func NewUDPGW() (gw *UDPGW) {
 	gw = &UDPGW{
 		MTU:      2048,
+		MaxConn:  64,
 		connList: map[uint16]*UDPConn{},
 		connLock: sync.RWMutex{},
 	}
@@ -68,7 +70,7 @@ func (u *UDPGW) PipeConn(conn io.ReadWriteCloser, target string) (err error) {
 		err = fmt.Errorf("conn is not frame.ReadWriteCloser")
 		return
 	}
-	offset := rwc.GetLengthFieldLength()
+	offset := rwc.GetDataOffset()
 	for {
 		data, xerr := rwc.ReadFrame()
 		if xerr != nil {
@@ -102,6 +104,7 @@ func (u *UDPGW) procData(piped frame.ReadWriteCloser, p []byte) (n int, err erro
 	conn := u.connList[conid]
 	u.connLock.RUnlock()
 	if conn == nil {
+		u.limitConn()
 		var addr *net.UDPAddr
 		if flags&UDPGW_CLIENT_FLAG_DNS == UDPGW_CLIENT_FLAG_DNS && u.DNS != nil {
 			addr = u.DNS
@@ -137,8 +140,8 @@ func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
 		conn.raw.Close()
 		core.DebugLog("UDPGW udp to %v is closed", conn.addr)
 	}()
-	buffer := make([]byte, u.MTU+piped.GetLengthFieldLength())
-	offset := piped.GetLengthFieldLength()
+	buffer := make([]byte, u.MTU+piped.GetDataOffset())
+	offset := piped.GetDataOffset()
 	if conn.flags&UDPGW_CLIENT_FLAG_IPV6 == UDPGW_CLIENT_FLAG_IPV6 {
 		buffer[offset] = UDPGW_CLIENT_FLAG_IPV6
 	} else {
@@ -176,6 +179,24 @@ func (u *UDPGW) StartTimeout(delay, timeout time.Duration) {
 
 func (u *UDPGW) StopTimeout() {
 	u.timeout = false
+}
+
+func (u *UDPGW) limitConn() {
+	u.connLock.Lock()
+	defer u.connLock.Unlock()
+	if len(u.connList) >= u.MaxConn-1 {
+		return
+	}
+	var oldest *UDPConn
+	for _, conn := range u.connList {
+		if oldest == nil || oldest.latest.After(conn.latest) {
+			oldest = conn
+		}
+	}
+	if oldest != nil {
+		oldest.raw.Close()
+		delete(u.connList, oldest.conid)
+	}
 }
 
 func (u *UDPGW) runTimeout(delay, timeout time.Duration) {

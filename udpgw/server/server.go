@@ -19,7 +19,7 @@ func main() {
 	ss5.BufferSize = 2048
 	ss5.Dialer = xio.PiperDialerF(func(uri string, bufferSize int) (raw xio.Piper, err error) {
 		fmt.Printf("dial to %v\n", uri)
-		if uri == "tcp://127.0.0.1:7300" {
+		if uri == "tcp://127.0.0.1:10" {
 			gw := udpgw.NewUDPGW()
 			gw.DNS = dns
 			udpgw := frame.NewBasePiper(gw, bufferSize)
@@ -33,7 +33,7 @@ func main() {
 		}
 		return
 	})
-	ss5.Start(":7100")
+	ss5.Start(":6100")
 	waiter := make(chan int)
 	<-waiter
 }
