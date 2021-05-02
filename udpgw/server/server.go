@@ -27,6 +27,7 @@ func main() {
 			udpgw.LengthFieldMagic = 0
 			udpgw.LengthFieldLength = 2
 			udpgw.LengthAdjustment = -2
+			udpgw.DataOffset = 2
 			raw = xio.NewPrintPiper("UDPGW", udpgw)
 		} else {
 			raw, err = xio.DialNetPiper(uri, bufferSize)

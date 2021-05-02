@@ -3,6 +3,7 @@ package gocs
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //Dial will dial remote by Dialer
 func (s *Server) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error) {
 	if uri == "tcp://udpgw" {
-		raw = udpgw.NewUDPGW()
+		udpgw := udpgw.NewUDPGW()
+		udpgw.DNS, err = net.ResolveUDPAddr("udp", s.Conf.DNSServer)
+		raw = udpgw
 	} else {
 		raw, err = s.Dialer.DialPiper(uri, bufferSize)
 	}

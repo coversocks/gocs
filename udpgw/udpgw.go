@@ -20,6 +20,7 @@ const UDPGW_CLIENT_FLAG_IPV6 = (1 << 3)
 type UDPConn struct {
 	raw    *net.UDPConn
 	addr   *net.UDPAddr
+	orig   *net.UDPAddr
 	conid  uint16
 	flags  uint8
 	latest time.Time
@@ -82,6 +83,10 @@ func (u *UDPGW) PipeConn(conn io.ReadWriteCloser, target string) (err error) {
 }
 
 func (u *UDPGW) procData(piped frame.ReadWriteCloser, p []byte) (n int, err error) {
+	if len(p) < 3 {
+		err = fmt.Errorf("data error")
+		return
+	}
 	flags := uint8(p[0])
 	conid := binary.BigEndian.Uint16(p[1:])
 	if flags&UDPGW_CLIENT_FLAG_KEEPALIVE == UDPGW_CLIENT_FLAG_KEEPALIVE {
@@ -105,13 +110,12 @@ func (u *UDPGW) procData(piped frame.ReadWriteCloser, p []byte) (n int, err erro
 	u.connLock.RUnlock()
 	if conn == nil {
 		u.limitConn()
-		var addr *net.UDPAddr
+		orig := &net.UDPAddr{IP: addrIP, Port: int(addrPort)}
+		addr := orig
 		if flags&UDPGW_CLIENT_FLAG_DNS == UDPGW_CLIENT_FLAG_DNS && u.DNS != nil {
 			addr = u.DNS
-		} else {
-			addr = &net.UDPAddr{IP: addrIP, Port: int(addrPort)}
 		}
-		conn = &UDPConn{conid: conid, flags: flags, addr: addr, latest: time.Now()}
+		conn = &UDPConn{conid: conid, flags: flags, addr: addr, orig: orig, latest: time.Now()}
 		conn.raw, err = net.DialUDP("udp", nil, addr)
 		if err != nil {
 			core.DebugLog("UDPGW udp dial to %v fail with %v", addr, err)
@@ -130,6 +134,7 @@ func (u *UDPGW) procData(piped frame.ReadWriteCloser, p []byte) (n int, err erro
 }
 
 func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
+	var err error
 	defer func() {
 		if perr := recover(); perr != nil {
 			core.WarnLog("UDPGW process raw read is panic by %v", perr)
@@ -138,7 +143,7 @@ func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
 		delete(u.connList, conn.conid)
 		u.connLock.Unlock()
 		conn.raw.Close()
-		core.DebugLog("UDPGW udp to %v is closed", conn.addr)
+		core.DebugLog("UDPGW udp to %v is closed by %v", conn.addr, err)
 	}()
 	buffer := make([]byte, u.MTU+piped.GetDataOffset())
 	offset := piped.GetDataOffset()
@@ -153,11 +158,12 @@ func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
 	offset += 1
 	binary.BigEndian.PutUint16(buffer[offset:], conn.conid)
 	offset += 2
-	offset += copy(buffer[offset:], conn.addr.IP)
-	binary.BigEndian.PutUint16(buffer[offset:], uint16(conn.addr.Port))
+	offset += copy(buffer[offset:], conn.orig.IP)
+	binary.BigEndian.PutUint16(buffer[offset:], uint16(conn.orig.Port))
 	offset += 2
+	var n int
 	for {
-		n, err := conn.raw.Read(buffer[offset:])
+		n, err = conn.raw.Read(buffer[offset:])
 		if err != nil {
 			break
 		}
