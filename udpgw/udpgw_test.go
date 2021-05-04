@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"testing"
 	"time"
 
@@ -12,6 +14,11 @@ import (
 	"github.com/codingeasygo/util/xio/frame"
 	"github.com/coversocks/gocs/core"
 )
+
+func init() {
+	http.HandleFunc("/debug/udpgw", StateH)
+	go http.ListenAndServe(":6061", nil)
+}
 
 func TestUDPGW(t *testing.T) {
 	core.SetLogLevel(core.LogLevelDebug)
@@ -61,12 +68,15 @@ func TestUDPGW(t *testing.T) {
 	var back []byte
 
 	//ipv4
-	sender.Write(datav4[0:lenv4])
-	back, _ = sender.ReadFrame()
-	if !bytes.Equal(back[4:], datav4[:lenv4]) {
-		fmt.Printf("back->%v,%v\n", back[4:], datav4[:lenv4])
-		t.Error("error")
-		return
+	for i := 0; i < 100; i++ {
+		binary.BigEndian.PutUint16(datav4[1:], uint16(i))
+		sender.Write(datav4[0:lenv4])
+		back, _ = sender.ReadFrame()
+		if !bytes.Equal(back[4:], datav4[:lenv4]) {
+			fmt.Printf("back->%v,%v\n", back[4:], datav4[:lenv4])
+			t.Error("error")
+			return
+		}
 	}
 
 	//ipv6
@@ -96,6 +106,8 @@ func TestUDPGW(t *testing.T) {
 		t.Error("error")
 		return
 	}
+
+	time.Sleep(1000 * time.Second)
 
 	//close
 	sender.Close()

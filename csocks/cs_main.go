@@ -4,12 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"time"
 
 	"github.com/coversocks/gocs"
 	"github.com/coversocks/gocs/core"
+	"github.com/coversocks/gocs/udpgw"
 )
 
 var version = "v1.2.0"
@@ -23,6 +26,8 @@ func init() {
 	flag.BoolVar(&argRunServer, "s", false, "start cover socket server")
 	flag.BoolVar(&argRunClient, "c", false, "start cover socket client")
 	flag.BoolVar(&argRunVersion, "v", false, "show version, current is "+version)
+	http.HandleFunc("/debug/udpgw", udpgw.StateH)
+	go http.ListenAndServe(":6060", nil)
 }
 
 func main() {

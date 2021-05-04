@@ -2,9 +2,11 @@ package udpgw
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -62,6 +64,9 @@ func (u *UDPGW) PipeConn(conn io.ReadWriteCloser, target string) (err error) {
 	defer func() {
 		conn.Close()
 		u.cloaseAllConn()
+		allUDPGWLock.Lock()
+		delete(allUDPGW, fmt.Sprintf("%p", u))
+		allUDPGWLock.Unlock()
 		core.InfoLog("UDPGW one connection %v is stopped by %v", conn, err)
 	}()
 	core.InfoLog("UDPGW one connection %v is starting", conn)
@@ -190,6 +195,7 @@ func (u *UDPGW) limitConn() {
 		}
 	}
 	if oldest != nil {
+		core.DebugLog("UDPGW closing connection %v by limit", oldest.addr)
 		oldest.raw.Close()
 		delete(u.connList, oldest.conid)
 	}
@@ -237,4 +243,26 @@ func procTimeout(timeout time.Duration) {
 		u.connLock.Unlock()
 	}
 	allUDPGWLock.Unlock()
+}
+
+func StateH(w http.ResponseWriter, r *http.Request) {
+	info := map[string]interface{}{}
+	allUDPGWLock.Lock()
+	for k, u := range allUDPGW {
+		udpgw := map[string]interface{}{}
+		u.connLock.Lock()
+		for key, conn := range u.connList {
+			udpgw[fmt.Sprintf("_%v", key)] = map[string]interface{}{
+				"addr":   conn.raw.RemoteAddr(),
+				"conid":  conn.conid,
+				"latest": conn.latest.Unix(),
+			}
+		}
+		u.connLock.Unlock()
+		info[k] = udpgw
+	}
+	allUDPGWLock.Unlock()
+	w.Header().Add("Content-Type", "application/json;charset=utf-8")
+	data, _ := json.Marshal(info)
+	w.Write(data)
 }

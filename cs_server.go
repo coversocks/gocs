@@ -73,7 +73,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error) {
 	if uri == "tcp://udpgw" {
 		udpgw := udpgw.NewUDPGW()
-		udpgw.DNS, err = net.ResolveUDPAddr("udp", s.Conf.DNSServer)
+		if len(s.Conf.DNSServer) > 0 {
+			udpgw.DNS, err = net.ResolveUDPAddr("udp", s.Conf.DNSServer)
+		}
 		raw = udpgw
 	} else {
 		raw, err = s.Dialer.DialPiper(uri, bufferSize)
