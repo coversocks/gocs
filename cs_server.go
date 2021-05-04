@@ -158,7 +158,7 @@ func (s *Server) ProcRestart() (err error) {
 	var server *httpServer
 	s.serversLock.Lock()
 	for a, srv := range s.servers {
-		if time.Now().Sub(srv.startTime) > timeout {
+		if time.Since(srv.startTime) > timeout {
 			addr, server = a, srv
 			break
 		}
@@ -245,6 +245,7 @@ func StartServer(c string) (err error) {
 		ErrorLog("Server read configure from %v fail with %v", c, err)
 		return
 	}
+	udpgw.StartTimeout(time.Second, 30*time.Second)
 	dialer := core.NewNetDialer("", conf.DNSServer)
 	dialer.Alias = conf.Alias
 	server = NewServer(c, conf, dialer)
@@ -265,4 +266,5 @@ func StopServer() {
 		server.Stop()
 		server = nil
 	}
+	udpgw.StopTimeout()
 }

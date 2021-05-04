@@ -41,6 +41,7 @@ func NewChannelConn(raw io.ReadWriteCloser, bufferSize int) (conn *ChannelConn) 
 	conn.SetLengthFieldMagic(1)
 	conn.SetLengthFieldOffset(0)
 	conn.SetDataOffset(5)
+	conn.SetTimeout(30 * time.Second)
 	return
 }
 

@@ -32,13 +32,12 @@ type UDPGW struct {
 	MaxConn  int
 	connList map[uint16]*UDPConn
 	connLock sync.RWMutex
-	timeout  bool
 }
 
 func NewUDPGW() (gw *UDPGW) {
 	gw = &UDPGW{
 		MTU:      2048,
-		MaxConn:  64,
+		MaxConn:  16,
 		connList: map[uint16]*UDPConn{},
 		connLock: sync.RWMutex{},
 	}
@@ -56,7 +55,6 @@ func (u *UDPGW) cloaseAllConn() {
 
 func (u *UDPGW) Close() (err error) {
 	u.cloaseAllConn()
-	u.StopTimeout()
 	return
 }
 
@@ -64,13 +62,17 @@ func (u *UDPGW) PipeConn(conn io.ReadWriteCloser, target string) (err error) {
 	defer func() {
 		conn.Close()
 		u.cloaseAllConn()
-		u.StopTimeout()
+		core.InfoLog("UDPGW one connection %v is stopped by %v", conn, err)
 	}()
+	core.InfoLog("UDPGW one connection %v is starting", conn)
 	rwc, ok := conn.(frame.ReadWriteCloser)
 	if !ok {
 		err = fmt.Errorf("conn is not frame.ReadWriteCloser")
 		return
 	}
+	allUDPGWLock.Lock()
+	allUDPGW[fmt.Sprintf("%p", u)] = u
+	allUDPGWLock.Unlock()
 	offset := rwc.GetDataOffset()
 	for {
 		data, xerr := rwc.ReadFrame()
@@ -118,7 +120,7 @@ func (u *UDPGW) procData(piped frame.ReadWriteCloser, p []byte) (n int, err erro
 		conn = &UDPConn{conid: conid, flags: flags, addr: addr, orig: orig, latest: time.Now()}
 		conn.raw, err = net.DialUDP("udp", nil, addr)
 		if err != nil {
-			core.DebugLog("UDPGW udp dial to %v fail with %v", addr, err)
+			core.WarnLog("UDPGW udp dial to %v fail with %v", addr, err)
 			return
 		}
 		core.DebugLog("UDPGW udp dial to %v success", addr)
@@ -175,18 +177,6 @@ func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
 	}
 }
 
-func (u *UDPGW) StartTimeout(delay, timeout time.Duration) {
-	if u.timeout {
-		panic("running")
-	}
-	u.timeout = true
-	go u.runTimeout(delay, timeout)
-}
-
-func (u *UDPGW) StopTimeout() {
-	u.timeout = false
-}
-
 func (u *UDPGW) limitConn() {
 	u.connLock.Lock()
 	defer u.connLock.Unlock()
@@ -205,26 +195,46 @@ func (u *UDPGW) limitConn() {
 	}
 }
 
-func (u *UDPGW) runTimeout(delay, timeout time.Duration) {
-	for u.timeout {
-		u.procTimeout(timeout)
+var allUDPGW = map[string]*UDPGW{}
+var allUDPGWLock = sync.RWMutex{}
+var allUDPGWRunning = false
+
+func StartTimeout(delay, timeout time.Duration) {
+	if allUDPGWRunning {
+		panic("running")
+	}
+	allUDPGWRunning = true
+	go runTimeout(delay, timeout)
+}
+
+func StopTimeout() {
+	allUDPGWRunning = false
+}
+
+func runTimeout(delay, timeout time.Duration) {
+	for allUDPGWRunning {
+		procTimeout(timeout)
 		time.Sleep(delay)
 	}
 }
 
-func (u *UDPGW) procTimeout(timeout time.Duration) {
+func procTimeout(timeout time.Duration) {
 	defer func() {
 		if perr := recover(); perr != nil {
 			core.WarnLog("UDPGW process timeout is panic by %v", perr)
 		}
 	}()
 	now := time.Now()
-	u.connLock.Lock()
-	for key, conn := range u.connList {
-		if now.Sub(conn.latest) > timeout {
-			conn.raw.Close()
-			delete(u.connList, key)
+	allUDPGWLock.Lock()
+	for _, u := range allUDPGW {
+		u.connLock.Lock()
+		for key, conn := range u.connList {
+			if now.Sub(conn.latest) > timeout {
+				conn.raw.Close()
+				delete(u.connList, key)
+			}
 		}
+		u.connLock.Unlock()
 	}
-	u.connLock.Unlock()
+	allUDPGWLock.Unlock()
 }

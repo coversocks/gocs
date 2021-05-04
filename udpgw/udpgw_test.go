@@ -78,13 +78,13 @@ func TestUDPGW(t *testing.T) {
 		return
 	}
 	//timeout
-	gw.StartTimeout(time.Millisecond, 10*time.Millisecond)
+	StartTimeout(time.Millisecond, 10*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
 	if len(gw.connList) > 0 {
 		t.Error("error")
 		return
 	}
-	gw.StopTimeout()
+	StopTimeout()
 
 	//dns
 	datav4[0] = UDPGW_CLIENT_FLAG_DNS
