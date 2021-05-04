@@ -185,7 +185,7 @@ func (u *UDPGW) procRead(piped frame.ReadWriteCloser, conn *UDPConn) {
 func (u *UDPGW) limitConn() {
 	u.connLock.Lock()
 	defer u.connLock.Unlock()
-	if len(u.connList) >= u.MaxConn-1 {
+	if len(u.connList) < u.MaxConn {
 		return
 	}
 	var oldest *UDPConn
@@ -195,7 +195,7 @@ func (u *UDPGW) limitConn() {
 		}
 	}
 	if oldest != nil {
-		core.DebugLog("UDPGW closing connection %v by limit", oldest.addr)
+		core.DebugLog("UDPGW closing connection %v by limit %v/%v", oldest.addr, len(u.connList), u.MaxConn)
 		oldest.raw.Close()
 		delete(u.connList, oldest.conid)
 	}
