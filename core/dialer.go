@@ -148,6 +148,10 @@ func (n *NetDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 		if err != nil {
 			return
 		}
+		if u.Hostname() == "echo" {
+			raw = xio.NewEchoConn()
+			return
+		}
 		switch u.Scheme {
 		case "echo":
 			raw = xio.NewEchoConn()
