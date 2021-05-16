@@ -97,7 +97,7 @@ func TestProxy(t *testing.T) {
 	})
 	conn := newBufferConn()
 	go func() {
-		err = client.PipeConn(conn, "tcp://echo")
+		err = clientInstance.PipeConn(conn, "tcp://echo")
 		if err != nil {
 			t.Error(err)
 			return
@@ -147,12 +147,12 @@ func TestProxy(t *testing.T) {
 	}
 
 	//
-	c := client
+	c := clientInstance
 	StopClient()
 	StopServer()
 	c.Client = nil
 	c.UpdateGfwlist()
-	fmt.Printf("client info %v\n", client)
+	fmt.Printf("client info %v\n", clientInstance)
 	wait.Wait()
 }
 
@@ -235,7 +235,7 @@ func TestMultiProxy(t *testing.T) {
 		conn := newBufferConn2()
 		conn.uri = data
 		conn.sended = []byte(data)
-		err := client.PipeConn(conn, "tcp://echo?a="+data)
+		err := clientInstance.PipeConn(conn, "tcp://echo?a="+data)
 		if string(conn.recved) != data {
 			t.Errorf("error:%v,%v,%v", err, conn.recved, data)
 			panic("error")
@@ -309,7 +309,7 @@ func BenchmarkProxy(b *testing.B) {
 		for pb.Next() {
 			conn := newBufferConn2()
 			conn.sended = []byte("123")
-			err := client.PipeConn(conn, "tcp://echo")
+			err := clientInstance.PipeConn(conn, "tcp://echo")
 			if string(conn.recved) != "123" {
 				b.Errorf("error:%v,%v", err, conn.recved)
 				return

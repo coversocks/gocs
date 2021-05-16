@@ -4,8 +4,8 @@ go 1.14
 
 require (
 	github.com/axw/gocov v1.0.0 // indirect
-	github.com/codingeasygo/util v0.0.0-20210504101538-8baaf4cfcd0f
+	github.com/codingeasygo/util v0.0.0-20210516024629-531316068abf
 	github.com/matm/gocov-html v0.0.0-20200509184451-71874e2e203b // indirect
-	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
-	golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420
+	golang.org/x/crypto v0.0.0-20210513164829-c07d793c2f9a // indirect
+	golang.org/x/net v0.0.0-20210510120150-4163338589ed
 )

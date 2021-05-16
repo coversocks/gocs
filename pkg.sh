@@ -11,7 +11,7 @@ output=$cpwd/build
 
 #### Package ####
 srv_name=coversocks
-srv_ver=1.2.2
+srv_ver=1.2.3
 srv_out=$output/$srv_name
 rm -rf $srv_out
 mkdir -p $srv_out

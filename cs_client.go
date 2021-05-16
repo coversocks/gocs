@@ -288,7 +288,7 @@ func (c *Client) Start() (err error) {
 	core.SetLogLevel(c.Conf.LogLevel)
 	proxysocks.SetLogLevel(c.Conf.LogLevel)
 	proxyhttp.SetLogLevel(c.Conf.LogLevel)
-	err = client.Boostrap(c.Dialer)
+	err = c.Boostrap(c.Dialer)
 	if err != nil {
 		ErrorLog("Client bootstrap fail with %v", err)
 		return
@@ -298,7 +298,7 @@ func (c *Client) Start() (err error) {
 			c.Stop()
 		}
 	}()
-	rules, err := client.ReadGfwRules()
+	rules, err := c.ReadGfwRules()
 	if err != nil {
 		ErrorLog("Client read gfw rules fail with %v", err)
 		return
@@ -306,11 +306,11 @@ func (c *Client) Start() (err error) {
 	gfw := core.NewGFW()
 	gfw.Set(strings.Join(rules, "\n"), core.GfwProxy)
 	directProcessor := core.NewNetDialer("", "")
-	autoProcessor := core.NewAutoPACDialer(client, directProcessor)
-	pacProcessor := core.NewPACDialer(client, autoProcessor)
+	autoProcessor := core.NewAutoPACDialer(c, directProcessor)
+	pacProcessor := core.NewPACDialer(c, autoProcessor)
 	pacProcessor.Check = gfw.IsProxy
 	pacProcessor.Mode = "auto"
-	c.Server = proxy.NewServer(client)
+	c.Server = proxy.NewServer(c)
 	c.AutoServer = proxy.NewServer(pacProcessor)
 	c.AutoDialer = autoProcessor
 	c.AutoDialer.LoadCache(filepath.Join(c.WorkDir, "pac.cache"))
@@ -330,10 +330,10 @@ func (c *Client) Start() (err error) {
 	}
 	if len(conf.ManagerAddr) > 0 {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/pac.js", client.PACH)
-		mux.HandleFunc("/changeProxyMode", client.ChangeProxyModeH)
-		mux.HandleFunc("/updateGfwlist", client.UpdateGfwlistH)
-		mux.HandleFunc("/state", client.StateH)
+		mux.HandleFunc("/pac.js", c.PACH)
+		mux.HandleFunc("/changeProxyMode", c.ChangeProxyModeH)
+		mux.HandleFunc("/updateGfwlist", c.UpdateGfwlistH)
+		mux.HandleFunc("/state", c.StateH)
 		if conf.PPROF == 1 {
 			mux.HandleFunc("/debug/pprof/", pprof.Index)
 			mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -388,10 +388,11 @@ func (c *Client) Stop() {
 	}
 }
 
+var addrRegexp = regexp.MustCompile(`:[0-9\\,\\-]+/`)
+
 func parseConnAddr(addr string) (addrs []string, err error) {
-	reg := regexp.MustCompile(":[0-9\\,\\-]+/")
-	addrParts := reg.Split(addr, 2)
-	addrPorts := strings.Trim(reg.FindString(addr), ":/")
+	addrParts := addrRegexp.Split(addr, 2)
+	addrPorts := strings.Trim(addrRegexp.FindString(addr), ":/")
 	if len(addrParts) < 2 {
 		err = fmt.Errorf("invalid uri")
 		return
@@ -427,25 +428,25 @@ func (c *Client) ChangeProxyMode(mode string) (message string, err error) {
 	return
 }
 
-var client *Client
+var clientInstance *Client
 
 //StartClient will start client by configure
 func StartClient(c string) (err error) {
-	client = NewClient(c, core.NewWebsocketDialer())
-	return client.Start()
+	clientInstance = NewClient(c, core.NewWebsocketDialer())
+	return clientInstance.Start()
 }
 
 //WaitClient will wait all runner
 func WaitClient() {
-	if client != nil {
-		client.Wait()
+	if clientInstance != nil {
+		clientInstance.Wait()
 	}
 }
 
 //StopClient will stop running client
 func StopClient() {
-	if client != nil {
-		client.Stop()
-		client = nil
+	if clientInstance != nil {
+		clientInstance.Stop()
+		clientInstance = nil
 	}
 }
