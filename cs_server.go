@@ -26,6 +26,7 @@ type ServerConf struct {
 	HTTPSAddr string            `json:"https_addr"`
 	HTTPSGen  int               `json:"https_gen"`
 	HTTPSLen  int               `json:"https_len"`
+	Timeout   int64             `json:"timeout"`
 	Manager   map[string]string `json:"manager"`
 	UserFile  string            `json:"user_file"`
 	LogLevel  int               `json:"log"`
@@ -35,7 +36,24 @@ type ServerConf struct {
 
 type httpServer struct {
 	Server    *http.Server
+	Timeout   time.Duration
 	startTime time.Time
+}
+
+func (h *httpServer) ListenAndServe() (err error) {
+	ln, err := net.Listen("tcp", h.Server.Addr)
+	if err == nil {
+		err = h.Server.Serve(xio.NewTimeoutListener(ln, h.Timeout))
+	}
+	return
+}
+
+func (h *httpServer) ListenAndServeTLS() (err error) {
+	ln, err := net.Listen("tcp", h.Server.Addr)
+	if err == nil {
+		err = h.Server.ServeTLS(xio.NewTimeoutListener(ln, h.Timeout), "", "")
+	}
+	return
 }
 
 //Server is coversocks Sever implement
@@ -44,6 +62,7 @@ type Server struct {
 	Conf        ServerConf
 	Dialer      xio.PiperDialer
 	Server      *core.Server
+	Timeout     time.Duration
 	servers     map[string]*httpServer
 	serversLock sync.RWMutex
 	waiter      sync.WaitGroup
@@ -57,6 +76,7 @@ func NewServer(confPath string, conf ServerConf, dialer xio.PiperDialer) (server
 		ConfPath:    confPath,
 		Conf:        conf,
 		Dialer:      dialer,
+		Timeout:     60 * time.Second,
 		servers:     map[string]*httpServer{},
 		serversLock: sync.RWMutex{},
 		waiter:      sync.WaitGroup{},
@@ -126,16 +146,16 @@ func (s *Server) httpsStart() (err error) {
 }
 
 func (s *Server) runServer(addr string, cert *tls.Certificate) (err error) {
-	srv := &http.Server{Addr: addr, Handler: s}
 	s.serversLock.Lock()
-	s.servers[addr] = &httpServer{Server: srv, startTime: time.Now()}
+	srv := &httpServer{Server: &http.Server{Addr: addr, Handler: s}, Timeout: s.Timeout, startTime: time.Now()}
+	s.servers[addr] = srv
 	s.serversLock.Unlock()
 	if cert != nil {
-		srv.TLSConfig = &tls.Config{
+		srv.Server.TLSConfig = &tls.Config{
 			Certificates: []tls.Certificate{*cert},
 		}
 		DebugLog("Server start tls server on %v", addr)
-		err = srv.ListenAndServeTLS("", "")
+		err = srv.ListenAndServeTLS()
 	} else {
 		DebugLog("Server start server on %v", addr)
 		err = srv.ListenAndServe()
@@ -199,6 +219,9 @@ func (s *Server) Start() (err error) {
 	s.mux.HandleFunc("/manager/", s.auth.ListUser)
 	s.mux.HandleFunc("/manager/addUser", s.auth.AddUser)
 	s.mux.HandleFunc("/manager/removeUser", s.auth.RemoveUser)
+	if s.Conf.Timeout > 0 {
+		s.Timeout = time.Duration(s.Conf.Timeout) * time.Millisecond
+	}
 	if len(s.Conf.HTTPAddr) < 1 && len(s.Conf.HTTPSAddr) < 1 {
 		err = fmt.Errorf("http_addr and https_addr is empty")
 		return
