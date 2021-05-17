@@ -15,7 +15,7 @@ import (
 	"github.com/coversocks/gocs/udpgw"
 )
 
-var version = "v1.2.0"
+var version = "v1.2.3"
 var argConf string
 var argRunServer bool
 var argRunClient bool
@@ -37,6 +37,7 @@ func main() {
 	if argRunVersion {
 		fmt.Printf("%v\n", version)
 	} else if argRunServer {
+		log.Printf("boostrap coversock %v as server", version)
 		err := gocs.StartServer(argConf)
 		if err != nil {
 			fmt.Printf("start server fail with %v\n", err)
@@ -46,6 +47,7 @@ func main() {
 		gocs.WaitServer()
 		time.Sleep(300 * time.Millisecond)
 	} else if argRunClient {
+		log.Printf("boostrap coversock %v as client", version)
 		err := gocs.StartClient(argConf)
 		if err != nil {
 			fmt.Printf("start client fail with %v\n", err)
@@ -75,6 +77,6 @@ func handlerClientKill() {
 	clientKillSignal = make(chan os.Signal, 1000)
 	signal.Notify(clientKillSignal, os.Kill, os.Interrupt)
 	v := <-clientKillSignal
-	core.WarnLog("Clien receive kill signal:%v", v)
+	core.WarnLog("Client receive kill signal:%v", v)
 	gocs.StopClient()
 }
