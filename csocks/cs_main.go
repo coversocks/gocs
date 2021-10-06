@@ -15,7 +15,7 @@ import (
 	"github.com/coversocks/gocs/udpgw"
 )
 
-var version = "v1.2.3"
+var version = "v1.3.0"
 var argConf string
 var argRunServer bool
 var argRunClient bool
