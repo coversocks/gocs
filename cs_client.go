@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,6 +78,7 @@ func (c *ClientServerDialer) String() string {
 //ClientConf is pojo for dark socks client configure
 type ClientConf struct {
 	Servers       []*ClientServerConf `json:"servers"`
+	Forwards      map[string]string   `json:"forwards"`
 	ProxyAddr     string              `json:"proxy_addr"`
 	AutoProxyAddr string              `json:"auto_proxy_addr"`
 	ManagerAddr   string              `json:"manager_addr"`
@@ -98,6 +100,7 @@ type Client struct {
 	AutoDialer *core.AutoPACDialer
 	Manager    *http.Server
 	Listener   net.Listener
+	Forwards   map[string]net.Listener
 }
 
 //NewClient will return new Client.
@@ -105,6 +108,7 @@ func NewClient(config string, dialer core.Dialer) (client *Client) {
 	client = &Client{
 		ConfPath: config,
 		Dialer:   dialer,
+		Forwards: map[string]net.Listener{},
 	}
 	return
 }
@@ -246,6 +250,40 @@ func (c *Client) UpdateGfwlistH(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%v", "ok")
 }
 
+func (c *Client) startForward(local, remote string) (err error) {
+	InfoLog("Client %v forward is starting", local)
+	locURL, err := url.Parse(local)
+	if err != nil {
+		WarnLog("Client parse forward %v=>%v fail with %v", local, remote, err)
+		return
+	}
+	listener, err := net.Listen(locURL.Scheme, locURL.Host)
+	if err != nil {
+		WarnLog("Client listen forward %v=>%v fail with %v", local, remote, err)
+		return
+	}
+	for {
+		conn, xerr := listener.Accept()
+		if xerr != nil {
+			err = xerr
+			break
+		}
+		go c.procForward(conn, remote)
+	}
+	InfoLog("Client %v forward is stopped by %v", local, err)
+	return
+}
+
+func (c *Client) procForward(conn net.Conn, remote string) (err error) {
+	defer conn.Close()
+	piper, err := c.Client.DialPiper(remote, c.BufferSize)
+	if err == nil {
+		defer piper.Close()
+		err = piper.PipeConn(conn, remote)
+	}
+	return
+}
+
 //StateH is http handler to show client state
 func (c *Client) StateH(w http.ResponseWriter, r *http.Request) {
 	res := map[string]interface{}{}
@@ -357,6 +395,9 @@ func (c *Client) Start() (err error) {
 		}()
 	}
 	c.ChangeProxyMode(conf.Mode)
+	for k, v := range conf.Forwards {
+		c.startForward(k, v)
+	}
 	return
 }
 

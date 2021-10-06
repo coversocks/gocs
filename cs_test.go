@@ -268,7 +268,7 @@ func TestMultiProxy(t *testing.T) {
 		waitc <- -1
 	}
 	waiter.Wait()
-	used := time.Now().Sub(begin)
+	used := time.Since(begin)
 	fmt.Printf("total:%v,used:%v,avg:%v\n", totalc, used, used/time.Duration(totalc))
 }
 
