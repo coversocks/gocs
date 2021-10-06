@@ -396,7 +396,7 @@ func (c *Client) Start() (err error) {
 	}
 	c.ChangeProxyMode(conf.Mode)
 	for k, v := range conf.Forwards {
-		c.startForward(k, v)
+		go c.startForward(k, v)
 	}
 	return
 }
