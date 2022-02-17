@@ -349,13 +349,13 @@ func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err 
 		_, err = conn.WriteCommand(CmdConnDial, []byte(target))
 		if err != nil {
 			conn.Close()
-			DebugLog("Client try dial to %v fail with %v", target, err)
+			DebugLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
 			continue
 		}
 		back, err = conn.ReadFrame()
 		if err != nil {
 			conn.Close()
-			DebugLog("Client try dial to %v fail with %v", target, err)
+			DebugLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
 			continue
 		}
 		break

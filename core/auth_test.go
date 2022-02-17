@@ -15,7 +15,7 @@ import (
 var client = &http.Client{}
 
 func httpGet(username, password, u string) (data string, err error) {
-	req, err := http.NewRequest("GET", u, nil)
+	req, _ := http.NewRequest("GET", u, nil)
 	if len(username) > 0 && len(password) > 0 {
 		req.SetBasicAuth(username, password)
 	}

@@ -265,7 +265,7 @@ func tlsHandshake(rawConn net.Conn, timeout time.Duration, config *tls.Config) (
 		errChannel <- conn.Handshake()
 	}()
 	err = <-errChannel
-	return conn, nil
+	return
 }
 
 func (w WebsocketDialer) dial(config *websocket.Config, timeout time.Duration) (conn net.Conn, err error) {

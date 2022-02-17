@@ -1,5 +1,5 @@
-github.com/codingeasygo/util v0.0.0-20210516060117-5d75390119b0 h1:ZddRc+4Fw3WKPxkrNY8rKEwVhGk+tDkxIUXVlLwWVbQ=
-github.com/codingeasygo/util v0.0.0-20210516060117-5d75390119b0/go.mod h1:9dg5FLVmPf1T+9CC6Mna6RAyfNjXwUQI5WX27Z+8yIY=
+github.com/codingeasygo/util v0.0.0-20220217032635-18b3c7cd610c h1:Zhg/Hs3wbHXySdCsipp80VIDwUyRtqX1VLFkjpt1Y6g=
+github.com/codingeasygo/util v0.0.0-20220217032635-18b3c7cd610c/go.mod h1:9dg5FLVmPf1T+9CC6Mna6RAyfNjXwUQI5WX27Z+8yIY=
 golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
 golang.org/x/net v0.0.0-20210510120150-4163338589ed h1:p9UgmWI9wKpfYmgaV/IZKGdXc5qEK45tDwwwDyjS26I=
 golang.org/x/net v0.0.0-20210510120150-4163338589ed/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=

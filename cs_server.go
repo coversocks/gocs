@@ -138,7 +138,7 @@ func (s *Server) httpsStart() (err error) {
 	s.waiter.Add(len(addrs))
 	for _, addr := range addrs {
 		var cert tls.Certificate
-		cert, _ = xcrypto.GenerateRSA(s.Conf.HTTPSLen)
+		cert, _, _, _ = xcrypto.GenerateWeb(nil, nil, false, "", "", s.Conf.HTTPSLen)
 		go s.runServer(addr, &cert)
 	}
 	InfoLog("Server https server on %v is started", s.Conf.HTTPSAddr)
@@ -191,7 +191,7 @@ func (s *Server) ProcRestart() (err error) {
 		return
 	}
 	InfoLog("Server https server on %v is restarting", addr)
-	cert, err := xcrypto.GenerateRSA(s.Conf.HTTPSLen)
+	cert, _, _, _ := xcrypto.GenerateWeb(nil, nil, false, "", "", s.Conf.HTTPSLen)
 	if err == nil {
 		server.Server.Close()
 		time.Sleep(100 * time.Millisecond)
