@@ -110,6 +110,22 @@ func TestProxy(t *testing.T) {
 		return
 	}
 	var res string
+	//test forward
+	testServer := http.Server{Addr: "127.0.0.1:11923", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "123")
+	})}
+	testListener, err := net.Listen("tcp", testServer.Addr)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer testListener.Close()
+	go testServer.Serve(testListener)
+	res, err = xhttp.GetText("http://127.0.0.1:10923")
+	if err != nil || res != "123" {
+		t.Error(err)
+		return
+	}
 	//test pac
 	res, err = xhttp.GetText("http://127.0.0.1:11101/pac.js")
 	if err != nil || !strings.Contains(res, "FindProxyForURL") {

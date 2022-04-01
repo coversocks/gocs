@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	_ "net/http/pprof"
 	"testing"
 	"time"
 
+	"github.com/codingeasygo/util/xhttp"
 	"github.com/codingeasygo/util/xio"
 	"github.com/codingeasygo/util/xio/frame"
 	"github.com/coversocks/gocs/core"
@@ -87,6 +89,9 @@ func TestUDPGW(t *testing.T) {
 		t.Error("error")
 		return
 	}
+	//state
+	ts := httptest.NewServer(http.HandlerFunc(StateH))
+	xhttp.GetText("%v", ts.URL)
 	//timeout
 	StartTimeout(time.Millisecond, 10*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
@@ -107,7 +112,7 @@ func TestUDPGW(t *testing.T) {
 		return
 	}
 
-	time.Sleep(1000 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	//close
 	sender.Close()

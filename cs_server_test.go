@@ -39,5 +39,5 @@ func TestRestart(t *testing.T) {
 		t.Error("error")
 		return
 	}
-	server.Stop()
+	StopServer()
 }

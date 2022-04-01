@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codingeasygo/util/proxy"
@@ -91,24 +92,26 @@ type ClientConf struct {
 //Client is dialer by ClientConf
 type Client struct {
 	*core.Client
-	Conf       ClientConf
-	WorkDir    string //current working dir
-	ConfPath   string
-	Dialer     core.Dialer
-	Server     *proxy.Server
-	AutoServer *proxy.Server
-	AutoDialer *core.AutoPACDialer
-	Manager    *http.Server
-	Listener   net.Listener
-	Forwards   map[string]net.Listener
+	Conf        ClientConf
+	WorkDir     string //current working dir
+	ConfPath    string
+	Dialer      core.Dialer
+	Server      *proxy.Server
+	AutoServer  *proxy.Server
+	AutoDialer  *core.AutoPACDialer
+	Manager     *http.Server
+	Listener    net.Listener
+	ForwardAll  map[string]net.Listener
+	ForwardLock sync.RWMutex
 }
 
 //NewClient will return new Client.
 func NewClient(config string, dialer core.Dialer) (client *Client) {
 	client = &Client{
-		ConfPath: config,
-		Dialer:   dialer,
-		Forwards: map[string]net.Listener{},
+		ConfPath:    config,
+		Dialer:      dialer,
+		ForwardAll:  map[string]net.Listener{},
+		ForwardLock: sync.RWMutex{},
 	}
 	return
 }
@@ -262,6 +265,15 @@ func (c *Client) startForward(local, remote string) (err error) {
 		WarnLog("Client listen forward %v=>%v fail with %v", local, remote, err)
 		return
 	}
+	c.ForwardLock.Lock()
+	c.ForwardAll[local] = listener
+	c.ForwardLock.Unlock()
+	defer func() {
+		listener.Close()
+		c.ForwardLock.Lock()
+		delete(c.ForwardAll, local)
+		c.ForwardLock.Unlock()
+	}()
 	for {
 		conn, xerr := listener.Accept()
 		if xerr != nil {
@@ -312,14 +324,19 @@ func (c *Client) Start() (err error) {
 		err = fmt.Errorf("Client proxy_addr is required")
 		return
 	}
-	var workDir = filepath.Dir(c.ConfPath)
+	workDir := ""
 	if len(conf.WorkDir) > 0 {
 		if filepath.IsAbs(conf.WorkDir) {
 			workDir = conf.WorkDir
 		} else {
-			workDir = filepath.Join(workDir, conf.WorkDir)
+			workDir = filepath.Join(filepath.Dir(c.ConfPath), conf.WorkDir)
 		}
-		workDir, _ = filepath.Abs(workDir)
+		workDir, err = filepath.Abs(workDir)
+	} else {
+		workDir, err = filepath.Abs(".")
+	}
+	if err != nil {
+		return
 	}
 	c.Conf, c.WorkDir = conf, workDir
 	InfoLog("Client using config from %v, work on %v, log level %v", c.ConfPath, workDir, c.Conf.LogLevel)
@@ -427,6 +444,12 @@ func (c *Client) Stop() {
 	if c.AutoServer != nil {
 		c.AutoServer.Close()
 	}
+	c.ForwardLock.Lock()
+	for key, l := range c.ForwardAll {
+		l.Close()
+		delete(c.ForwardAll, key)
+	}
+	c.ForwardLock.Unlock()
 }
 
 var addrRegexp = regexp.MustCompile(`:[0-9\\,\\-]+/`)

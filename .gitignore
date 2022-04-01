@@ -17,3 +17,5 @@ netstack/*.pcap
 test/test
 csocks/csocks
 udpgw/server/server
+.DS_Store
+test_work_dir

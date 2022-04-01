@@ -6,7 +6,7 @@
     "manager": {
         "test": "40bd001563085fc35165329ea1ff5c5ecbdbbeef"
     },
-    "timeout":3000,
+    "timeout": 3000,
     "user_file": "default-user.json",
     "log": 40
 }

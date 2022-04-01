@@ -195,8 +195,8 @@ func (s *Server) ProcConn(raw io.ReadWriteCloser) (err error) {
 		DebugLog("Server transfer is started from %v to %v", conn, piper)
 		piper.PipeConn(conn, targetURI)
 		DebugLog("Server transfer is stopped from %v to %v", conn, piper)
-		piper.Close()
 		conn.Using = ""
+		piper.Close()
 		if conn.Error != nil {
 			break
 		}
@@ -220,27 +220,33 @@ func (s *Server) Close() (err error) {
 //Client is normal client for implement dark socket protocl
 type Client struct {
 	*xhttp.Client
-	conns      map[string]*ChannelConn
-	idles      map[string]*ChannelConn
-	connsLck   sync.RWMutex
-	BufferSize int
-	MaxIdle    int
-	Dialer     Dialer
-	TryMax     int
-	TryDelay   time.Duration
+	conns         map[string]*ChannelConn
+	idles         map[string]*ChannelConn
+	connsLck      sync.RWMutex
+	BufferSize    int
+	MaxIdle       int
+	KeepIdle      time.Duration
+	TimeoutTicker time.Duration
+	Dialer        Dialer
+	TryMax        int
+	TryDelay      time.Duration
+	exit          chan int
 }
 
 //NewClient will create client by buffer size and dialer
 func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 	client = &Client{
-		conns:      map[string]*ChannelConn{},
-		idles:      map[string]*ChannelConn{},
-		connsLck:   sync.RWMutex{},
-		MaxIdle:    100,
-		BufferSize: bufferSize,
-		Dialer:     dialer,
-		TryMax:     5,
-		TryDelay:   500 * time.Millisecond,
+		conns:         map[string]*ChannelConn{},
+		idles:         map[string]*ChannelConn{},
+		connsLck:      sync.RWMutex{},
+		MaxIdle:       100,
+		KeepIdle:      10 * time.Second,
+		TimeoutTicker: time.Second,
+		BufferSize:    bufferSize,
+		Dialer:        dialer,
+		TryMax:        5,
+		TryDelay:      500 * time.Millisecond,
+		exit:          make(chan int, 1),
 	}
 	raw := &http.Client{
 		Transport: &http.Transport{
@@ -248,6 +254,7 @@ func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 		},
 	}
 	client.Client = xhttp.NewClient(raw)
+	go client.timeoutLoop()
 	return
 }
 
@@ -262,6 +269,7 @@ func (c *Client) Close() (err error) {
 	for _, conn := range conns {
 		conn.Close()
 	}
+	c.exit <- 1
 	return
 }
 
@@ -271,6 +279,31 @@ func (c *Client) httpDial(network, addr string) (conn net.Conn, err error) {
 		go c.PipeConn(proxy, network+"://"+addr)
 	}
 	return
+}
+
+func (c *Client) timeoutLoop() {
+	ticker := time.NewTicker(c.TimeoutTicker)
+	running := true
+	for running {
+		select {
+		case <-c.exit:
+			running = false
+		case <-ticker.C:
+			c.timeoutConn()
+		}
+	}
+}
+
+func (c *Client) timeoutConn() {
+	c.connsLck.Lock()
+	for key, conn := range c.idles {
+		if time.Since(conn.LastUsed) > c.KeepIdle {
+			DebugLog("Client remove one timeout channel in idle pool")
+			conn.Close()
+			delete(c.idles, key)
+		}
+	}
+	c.connsLck.Unlock()
 }
 
 //pullConn will return Conn in idle pool, if pool is empty, dial new by Dialer
@@ -342,20 +375,20 @@ func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err 
 		}
 		conn, err = c.pullConn()
 		if err != nil {
-			DebugLog("Client try pull connection fail with %v", err)
+			InfoLog("Client try pull connection fail with %v", err)
 			continue
 		}
 		DebugLog("Client try dial to %v", target)
 		_, err = conn.WriteCommand(CmdConnDial, []byte(target))
 		if err != nil {
 			conn.Close()
-			DebugLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
+			InfoLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
 			continue
 		}
 		back, err = conn.ReadFrame()
 		if err != nil {
 			conn.Close()
-			DebugLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
+			InfoLog("Client try %v dial to %v fail with %v, will retry after %v", i, target, err, c.TryDelay)
 			continue
 		}
 		break
@@ -367,7 +400,7 @@ func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err 
 	if backMessage != "ok" {
 		err = fmt.Errorf("%v", backMessage)
 		c.pushConn(conn)
-		DebugLog("Client try dial to %v fail with %v", target, err)
+		InfoLog("Client try dial to %v fail with %v", target, err)
 		return
 	}
 	conn.Using = target

@@ -10,11 +10,14 @@
             "password": "123"
         }
     ],
+    "forwards": {
+        "tcp://:10923": "tcp://127.0.0.1:11923"
+    },
     "proxy_addr": "0.0.0.0:11105",
     "auto_proxy_addr": "0.0.0.0:11106",
     "manager_addr": "0.0.0.0:11101",
     "mode": "global",
     "log": 40,
     "work_dir": "test_work_dir",
-    "pprof": 0
+    "pprof": 1
 }

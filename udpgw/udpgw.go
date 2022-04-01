@@ -204,6 +204,8 @@ func (u *UDPGW) limitConn() {
 var allUDPGW = map[string]*UDPGW{}
 var allUDPGWLock = sync.RWMutex{}
 var allUDPGWRunning = false
+var timeoutExit = make(chan int, 1)
+var timeoutWait = make(chan int, 1)
 
 func StartTimeout(delay, timeout time.Duration) {
 	if allUDPGWRunning {
@@ -214,14 +216,23 @@ func StartTimeout(delay, timeout time.Duration) {
 }
 
 func StopTimeout() {
+	timeoutExit <- 1
+	<-timeoutWait
 	allUDPGWRunning = false
 }
 
 func runTimeout(delay, timeout time.Duration) {
-	for allUDPGWRunning {
-		procTimeout(timeout)
-		time.Sleep(delay)
+	ticker := time.NewTicker(delay)
+	running := true
+	for running {
+		select {
+		case <-timeoutExit:
+			running = false
+		case <-ticker.C:
+			procTimeout(timeout)
+		}
 	}
+	timeoutWait <- 1
 }
 
 func procTimeout(timeout time.Duration) {

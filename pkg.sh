@@ -2,44 +2,52 @@
 ##############################
 #####Setting Environments#####
 echo "Setting Environments"
-set -e
+set -xe
 export cpwd=`pwd`
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib
-export PATH=$PATH:$GOPATH/bin:$HOME/bin:$GOROOT/bin
-output=$cpwd/build
-
-
 #### Package ####
+srv_ver=$1
 srv_name=coversocks
-srv_ver=1.4.0
+build=$cpwd/build
+output=$cpwd/build/$srv_name-$srv_ver
+out_dir=$srv_name-$srv_ver
 srv_out=$output/$srv_name
-rm -rf $srv_out
-mkdir -p $srv_out
+go_path=`go env GOPATH`
+go_os=`go env GOOS`
+go_arch=`go env GOARCH`
+
 ##build normal
+cat <<EOF > version.go
+package gocs
+
+const Version = "$srv_ver"
+EOF
 echo "Build $srv_name normal executor..."
 go build -o $srv_out/csocks github.com/coversocks/gocs/csocks
 cp -f coversocks-install.sh $srv_out
-cp -f cert.sh $srv_out
 cp -f coversocks.service $srv_out
-cp -f default-*.json $srv_out
+cp -f default-*.json docker-*.json $srv_out
 cp -f csuser.json $srv_out
 cp -f gfwlist.txt $srv_out
 cp -f abp.js $srv_out
 cp -f networksetup-*.sh $srv_out
 cp -f run.sh $srv_out
-if [ "$UDPGW_DIR" != "" ];then
-    cp -f udpgw.service $srv_out
-    cd $UDPGW_DIR
-    mkdir -p build
-    cd build
-    cmake ..
-    make badvpn-udpgw
-    cp -f udpgw/badvpn-udpgw $srv_out/udpgw
-fi
+cp -f Dockerfile entrypoint.sh $output
 
-###
+##normal package
 cd $output
-rm -f $srv_name-$srv_ver-`uname`.zip
-zip -r $srv_name-$srv_ver-`uname`.zip $srv_name
-cd ../
-echo "Package $srv_name done..."
+out_tar=$srv_name-$go_os-$go_arch-$srv_ver.tar.gz
+rm -f $out_tar
+tar -czvf $build/$out_tar $srv_name
+
+##docker package
+having=`docker image ls -q coversocks:$srv_ver`
+if [ "$having" != "" ];then
+  docker image rm -f coversocks:$srv_ver
+fi
+docker build -t coversocks:$srv_ver .
+cd $output
+docker image save coversocks:$srv_ver -o coversocks-$srv_ver.img
+tar -czvf coversocks-docker-$srv_ver.tar.gz coversocks-$srv_ver.img
+
+echo "Package $srv_name-$go_os-$go_arch-$srv_ver done..."

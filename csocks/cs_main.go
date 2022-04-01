@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/coversocks/gocs"
@@ -15,7 +16,7 @@ import (
 	"github.com/coversocks/gocs/udpgw"
 )
 
-var version = "v1.4.0"
+var version = gocs.Version
 var argConf string
 var argRunServer bool
 var argRunClient bool
@@ -65,7 +66,7 @@ var serverKillSignal chan os.Signal
 
 func handlerServerKill() {
 	serverKillSignal = make(chan os.Signal, 1000)
-	signal.Notify(serverKillSignal, os.Kill, os.Interrupt)
+	signal.Notify(serverKillSignal, syscall.SIGTERM, os.Interrupt)
 	v := <-serverKillSignal
 	core.WarnLog("Server receive kill signal:%v", v)
 	gocs.StopServer()
@@ -75,7 +76,7 @@ var clientKillSignal chan os.Signal
 
 func handlerClientKill() {
 	clientKillSignal = make(chan os.Signal, 1000)
-	signal.Notify(clientKillSignal, os.Kill, os.Interrupt)
+	signal.Notify(clientKillSignal, syscall.SIGTERM, os.Interrupt)
 	v := <-clientKillSignal
 	core.WarnLog("Client receive kill signal:%v", v)
 	gocs.StopClient()
