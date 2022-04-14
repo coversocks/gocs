@@ -81,6 +81,7 @@ type ClientConf struct {
 	Servers       []*ClientServerConf `json:"servers"`
 	Forwards      map[string]string   `json:"forwards"`
 	ProxyAddr     string              `json:"proxy_addr"`
+	ProxySkip     []string            `json:"proxy_skip"`
 	AutoProxyAddr string              `json:"auto_proxy_addr"`
 	ManagerAddr   string              `json:"manager_addr"`
 	Mode          string              `json:"mode"`
@@ -358,6 +359,12 @@ func (c *Client) Start() (err error) {
 		ErrorLog("Client read gfw rules fail with %v", err)
 		return
 	}
+	skipDialer := core.NewSkipDialer(c)
+	err = skipDialer.AddSkip(c.Conf.ProxySkip...)
+	if err != nil {
+		ErrorLog("Client parse proxy skip fail with %v", err)
+		return
+	}
 	gfw := core.NewGFW()
 	gfw.Set(strings.Join(rules, "\n"), core.GfwProxy)
 	directProcessor := core.NewNetDialer("", "")
@@ -365,7 +372,7 @@ func (c *Client) Start() (err error) {
 	pacProcessor := core.NewPACDialer(c, autoProcessor)
 	pacProcessor.Check = gfw.IsProxy
 	pacProcessor.Mode = "auto"
-	c.Server = proxy.NewServer(c)
+	c.Server = proxy.NewServer(skipDialer)
 	c.AutoServer = proxy.NewServer(pacProcessor)
 	c.AutoDialer = autoProcessor
 	c.AutoDialer.LoadCache(filepath.Join(c.WorkDir, "pac.cache"))

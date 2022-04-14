@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -623,4 +624,45 @@ func (p *AutoPACDialer) DialPiper(target string, bufferSize int) (raw xio.Piper,
 
 func (p *AutoPACDialer) String() string {
 	return "AutoPACDialer"
+}
+
+type SkipDialer struct {
+	Proxy       xio.PiperDialer
+	Direct      xio.PiperDialer
+	skipMatcher []*regexp.Regexp
+}
+
+func NewSkipDialer(proxy xio.PiperDialer) (dialer *SkipDialer) {
+	dialer = &SkipDialer{
+		Proxy:  proxy,
+		Direct: NewNetDialer("", ""),
+	}
+	return
+}
+
+func (s *SkipDialer) AddSkip(skips ...string) (err error) {
+	var matcher *regexp.Regexp
+	var matchers []*regexp.Regexp
+	for _, skip := range skips {
+		matcher, err = regexp.Compile(skip)
+		if err != nil {
+			break
+		}
+		matchers = append(matchers, matcher)
+	}
+	if err == nil {
+		s.skipMatcher = append(s.skipMatcher, matchers...)
+	}
+	return
+}
+
+func (s *SkipDialer) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error) {
+	for _, matcher := range s.skipMatcher {
+		if matcher.MatchString(uri) {
+			raw, err = s.Direct.DialPiper(uri, bufferSize)
+			return
+		}
+	}
+	raw, err = s.Proxy.DialPiper(uri, bufferSize)
+	return
 }
