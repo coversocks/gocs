@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +20,39 @@ import (
 	"github.com/codingeasygo/util/xtime"
 	"golang.org/x/net/websocket"
 )
+
+type Duration time.Duration
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) (err error) {
+	val, err := time.ParseDuration(string(b))
+	if err == nil {
+		*d = Duration(val)
+	}
+	return
+}
+
+func (d *Duration) String() string {
+	return time.Duration(*d).String()
+}
+
+type TestResult struct {
+	Min     Duration               `json:"min"`
+	Max     Duration               `json:"max"`
+	Avg     Duration               `json:"avg"`
+	Success int64                  `json:"success"`
+	Fail    int64                  `json:"fail"`
+	Error   string                 `json:"error"`
+	Info    map[string]interface{} `json:"info"`
+}
+
+//Tester is interface for test raw connect by worker
+type Tester interface {
+	Test(remote string, worker func(raw io.ReadWriteCloser) (err error)) (result *TestResult)
+}
 
 //Dialer is interface for dial raw connect by string
 type Dialer interface {
@@ -295,31 +329,40 @@ func basicAuth(username, password string) string {
 
 //SortedDialer will auto sort the dialer by used time/error rate
 type SortedDialer struct {
-	dialers       []Dialer
-	avgTime       []int64
-	usedTime      []int64
-	tryCount      []int64
-	errCount      []int64
-	errRate       []float32
+	keys          []string
+	dialers       map[string]Dialer
+	avgTime       map[string]int64
+	usedTime      map[string]int64
+	tryCount      map[string]int64
+	errCount      map[string]int64
+	errRate       map[string]float32
 	sorting       int32
 	sortTime      int64
 	sortLock      sync.RWMutex
+	Name          string
 	RateTolerance float32
 	SortDelay     int64
+	TestMax       int
 }
 
 //NewSortedDialer will new sorted dialer by sub dialer
 func NewSortedDialer(dialers ...Dialer) (dialer *SortedDialer) {
 	dialer = &SortedDialer{
-		dialers:       dialers,
-		avgTime:       make([]int64, len(dialers)),
-		usedTime:      make([]int64, len(dialers)),
-		tryCount:      make([]int64, len(dialers)),
-		errCount:      make([]int64, len(dialers)),
-		errRate:       make([]float32, len(dialers)),
+		dialers:       map[string]Dialer{},
+		avgTime:       map[string]int64{},
+		usedTime:      map[string]int64{},
+		tryCount:      map[string]int64{},
+		errCount:      map[string]int64{},
+		errRate:       map[string]float32{},
 		sortLock:      sync.RWMutex{},
 		RateTolerance: 0.15,
 		SortDelay:     5000,
+		TestMax:       3,
+	}
+	for _, d := range dialers {
+		key := fmt.Sprintf("%v", d)
+		dialer.keys = append(dialer.keys, key)
+		dialer.dialers[key] = d
 	}
 	return
 }
@@ -327,22 +370,27 @@ func NewSortedDialer(dialers ...Dialer) (dialer *SortedDialer) {
 //Dial impl the Dialer
 func (s *SortedDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 	err = fmt.Errorf("not dialer")
-	s.sortLock.RLock()
-	for i, dialer := range s.dialers {
+	for _, key := range s.keys {
+		s.sortLock.Lock()
+		dialer := s.dialers[key]
 		begin := xtime.Now()
-		s.tryCount[i]++
+		s.tryCount[key]++
+		s.sortLock.Unlock()
 		raw, err = dialer.Dial(remote)
 		if err == nil {
+			s.sortLock.Lock()
 			used := xtime.Now() - begin
-			s.usedTime[i] += used
-			s.avgTime[i] = s.usedTime[i] / (s.tryCount[i] - s.errCount[i])
-			s.errRate[i] = float32(s.errCount[i]) / float32(s.tryCount[i])
+			s.usedTime[key] += used
+			s.avgTime[key] = s.usedTime[key] / (s.tryCount[key] - s.errCount[key])
+			s.errRate[key] = float32(s.errCount[key]) / float32(s.tryCount[key])
+			s.sortLock.Unlock()
 			break
 		}
-		s.errCount[i]++
-		s.errRate[i] = float32(s.errCount[i]) / float32(s.tryCount[i])
+		s.sortLock.Lock()
+		s.errCount[key]++
+		s.errRate[key] = float32(s.errCount[key]) / float32(s.tryCount[key])
+		s.sortLock.Unlock()
 	}
-	s.sortLock.RUnlock()
 	if atomic.CompareAndSwapInt32(&s.sorting, 0, 1) && xtime.Now()-s.sortTime > s.SortDelay {
 		go func() {
 			s.sortLock.Lock()
@@ -362,22 +410,102 @@ func (s *SortedDialer) Len() int {
 // Less reports whether the element with
 // index i should sort before the element with index j.
 func (s *SortedDialer) Less(i, j int) (r bool) {
-	if s.errRate[i] < s.errRate[j] {
-		r = s.errRate[j]-s.errRate[i] > s.RateTolerance || s.avgTime[i] < s.avgTime[j]
+	iKey, jKey := s.keys[i], s.keys[j]
+	if s.errRate[iKey] < s.errRate[jKey] {
+		r = s.errRate[jKey]-s.errRate[iKey] > s.RateTolerance || s.avgTime[iKey] < s.avgTime[jKey]
 	} else {
-		r = s.errRate[i]-s.errRate[j] < s.RateTolerance && s.avgTime[i] < s.avgTime[j]
+		r = s.errRate[iKey]-s.errRate[jKey] < s.RateTolerance && s.avgTime[iKey] < s.avgTime[jKey]
 	}
 	return
 }
 
 // Swap swaps the elements with indexes i and j.
 func (s *SortedDialer) Swap(i, j int) {
-	s.dialers[i], s.dialers[j] = s.dialers[j], s.dialers[i]
-	s.avgTime[i], s.avgTime[j] = s.avgTime[j], s.avgTime[i]
-	s.usedTime[i], s.usedTime[j] = s.usedTime[j], s.usedTime[i]
-	s.tryCount[i], s.tryCount[j] = s.tryCount[j], s.tryCount[i]
-	s.errCount[i], s.errCount[j] = s.errCount[j], s.errCount[i]
-	s.errRate[i], s.errRate[j] = s.errRate[j], s.errRate[i]
+	s.keys[i], s.keys[j] = s.keys[j], s.keys[i]
+}
+
+// Test will test and sort dialer
+func (s *SortedDialer) Test(remote string, worker func(raw io.ReadWriteCloser) (err error)) (result *TestResult) {
+	result = &TestResult{}
+	allKeys := s.keys
+	if s.TestMax > 0 && len(allKeys) > s.TestMax {
+		allKeys = allKeys[0:s.TestMax]
+	}
+	allDialer := map[string]Dialer{}
+	s.sortLock.RLock()
+	for _, key := range allKeys {
+		allDialer[key] = s.dialers[key]
+	}
+	s.sortLock.RUnlock()
+	allUsed := map[string]Duration{}
+	allFail := map[string]string{}
+	allInfo := map[string]*TestResult{}
+	for key, dialer := range allDialer {
+		if tester, ok := dialer.(Tester); ok {
+			keyResult := tester.Test(remote, worker)
+			allInfo[key] = keyResult
+			if len(keyResult.Error) > 0 {
+				allFail[key] = keyResult.Error
+				result.Error = keyResult.Error
+				continue
+			}
+			allUsed[key] = keyResult.Avg
+		} else {
+			begin := time.Now()
+			raw, err := dialer.Dial(remote)
+			if err != nil {
+				allFail[key] = err.Error()
+				result.Error = err.Error()
+				continue
+			}
+			err = worker(raw)
+			if err != nil {
+				allFail[key] = err.Error()
+				result.Error = err.Error()
+				raw.Close()
+				continue
+			}
+			allUsed[key] = Duration(time.Since(begin))
+			raw.Close()
+		}
+	}
+	s.sortLock.Lock()
+	totalUsed := Duration(0)
+	result.Min = Duration(time.Minute)
+	result.Info = map[string]interface{}{}
+	for key := range allDialer {
+		fail := allFail[key]
+		used := allUsed[key]
+		s.tryCount[key]++
+		if len(fail) > 0 {
+			s.errCount[key]++
+			s.errRate[key] = float32(s.errCount[key]) / float32(s.tryCount[key])
+			result.Fail++
+			result.Info[key] = fail
+		} else {
+			s.usedTime[key] += time.Duration(used).Milliseconds()
+			s.avgTime[key] = s.usedTime[key] / (s.tryCount[key] - s.errCount[key])
+			s.errRate[key] = float32(s.errCount[key]) / float32(s.tryCount[key])
+			result.Success++
+			if result.Min > used {
+				result.Min = used
+			}
+			if result.Max < used {
+				result.Max = used
+			}
+			totalUsed += used
+			result.Info[key] = used.String()
+		}
+		if allInfo[key] != nil {
+			result.Info[key] = allInfo[key]
+		}
+	}
+	if result.Success > 0 {
+		result.Avg = totalUsed / Duration(result.Success)
+	}
+	sort.Sort(s)
+	s.sortLock.Unlock()
+	return
 }
 
 //State will return current dialer state
@@ -398,112 +526,9 @@ func (s *SortedDialer) State() interface{} {
 	return res
 }
 
-// //AsyncConn is an io.ReadWriteCloser impl, it will wait the base connection is connected
-// type AsyncConn struct {
-// 	Err  error
-// 	Next io.ReadWriteCloser
-// 	lck  sync.RWMutex
-// }
-
-// //NewAsyncConn will return new AsyncConn
-// func NewAsyncConn() (conn *AsyncConn) {
-// 	conn = &AsyncConn{
-// 		lck: sync.RWMutex{},
-// 	}
-// 	return
-// }
-
-// func (a *AsyncConn) Read(p []byte) (n int, err error) {
-// 	a.lck.RLock()
-// 	if a.Err == nil {
-// 		n, err = a.Next.Read(p)
-// 	} else {
-// 		err = a.Err
-// 	}
-// 	a.lck.RUnlock()
-// 	return
-// }
-
-// func (a *AsyncConn) Write(p []byte) (n int, err error) {
-// 	a.lck.RLock()
-// 	if a.Err == nil {
-// 		n, err = a.Next.Write(p)
-// 	} else {
-// 		err = a.Err
-// 	}
-// 	a.lck.RUnlock()
-// 	return
-// }
-
-// //Close will close connection
-// func (a *AsyncConn) Close() (err error) {
-// 	a.lck.RLock()
-// 	if a.Err == nil {
-// 		err = a.Next.Close()
-// 	}
-// 	a.lck.RUnlock()
-// 	return
-// }
-
-// //lock for connection, read/write/close will be locked
-// //it should be call befer dial return
-// func (a *AsyncConn) lock() {
-// 	a.lck.Lock()
-// }
-
-// //unlocak for next connection is connected
-// func (a *AsyncConn) unlock(next io.ReadWriteCloser, err error) {
-// 	a.Next = next
-// 	a.Err = err
-// 	a.lck.Unlock()
-// }
-
-// //AsyncDialer is Dialer impl, it will dial remote connection by async
-// type AsyncDialer struct {
-// 	Next Dialer
-// }
-
-// //NewAsyncDialer will return new AsyncDialer
-// func NewAsyncDialer(next Dialer) (dialer *AsyncDialer) {
-// 	dialer = &AsyncDialer{
-// 		Next: next,
-// 	}
-// 	return
-// }
-
-// //Dial to remote and get the connection
-// func (a *AsyncDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
-// 	conn := NewAsyncConn()
-// 	conn.lock() //lock for wait connect
-// 	go func() {
-// 		next, cerr := a.Next.Dial(remote)
-// 		if cerr != nil {
-// 			DebugLog("AsyncDialer dial to %v fail with %v", remote, cerr)
-// 		}
-// 		conn.unlock(next, cerr) //unlock for connected
-// 	}()
-// 	raw = conn
-// 	return
-// }
-
-// type PrintDialer struct {
-// 	Dialer
-// }
-
-// func NewPrintDialer(base Dialer) (dialer *PrintDialer) {
-// 	dialer = &PrintDialer{
-// 		Dialer: base,
-// 	}
-// 	return
-// }
-
-// func (m *PrintDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
-// 	base, err := m.Dialer.Dial(remote)
-// 	if err == nil {
-// 		raw = xio.NewPrintConn("Print", base)
-// 	}
-// 	return
-// }
+func (s *SortedDialer) String() string {
+	return s.Name
+}
 
 //PACDialer to impl xio.PiperDialer for pac
 type PACDialer struct {

@@ -58,10 +58,10 @@ func (c *ClientServerDialer) Dial(remote string) (raw io.ReadWriteCloser, err er
 			address += fmt.Sprintf("?username=%v&password=%v", c.Username, c.Password)
 		}
 	}
-	InfoLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
+	DebugLog("Client start connect one channel to %v-%v", c.Name, c.LastUsed)
 	raw, err = c.Base.Dial(address)
 	if err == nil {
-		InfoLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
+		DebugLog("Client connect one channel to %v-%v success", c.Name, c.LastUsed)
 		conn := xio.NewStringConn(raw)
 		conn.Name = c.Name
 		raw = conn
@@ -124,17 +124,18 @@ func (c *Client) Boostrap(base core.Dialer) (err error) {
 		if !(conf.Enable && len(conf.Address) > 0) {
 			continue
 		}
+		var innerDialers []core.Dialer
 		for _, addr := range conf.Address {
 			addrs, xerr := parseConnAddr(addr)
 			if xerr != nil {
 				return xerr
 			}
 			for _, a := range addrs {
-				dialers = append(dialers, &ClientServerDialer{
+				innerDialers = append(innerDialers, &ClientServerDialer{
 					Base: base,
 					ClientServerConf: &ClientServerConf{
 						Enable:   true,
-						Name:     conf.Name,
+						Name:     a,
 						Address:  []string{a},
 						Username: conf.Username,
 						Password: conf.Password,
@@ -142,6 +143,9 @@ func (c *Client) Boostrap(base core.Dialer) (err error) {
 				})
 			}
 		}
+		innerDialer := core.NewSortedDialer(innerDialers...)
+		innerDialer.Name = conf.Name
+		dialers = append(dialers, innerDialer)
 	}
 	var dialer = core.NewSortedDialer(dialers...)
 	c.Client = core.NewClient(core.DefaultBufferSize, dialer)

@@ -21,7 +21,7 @@ import (
 
 func init() {
 	SetLogLevel(LogLevelDebug)
-	go http.ListenAndServe("localhost:6060", nil)
+	go http.ListenAndServe("localhost:6061", nil)
 }
 
 func TestCoversocket(t *testing.T) {
@@ -104,7 +104,7 @@ func TestCoversocket(t *testing.T) {
 			return
 		}))
 		client.MaxIdle = 0
-		client.TimeoutTicker = 1 * time.Millisecond
+		client.TickerDelay = 1 * time.Millisecond
 		//
 		clientConn1, clientRemote1, _ := xio.CreatePipedConn()
 		clientConn1.Alias, clientRemote1.Alias = "ClientConn1", "ClientRemote1"
@@ -142,7 +142,7 @@ func TestCoversocket(t *testing.T) {
 		wait.Wait()
 		fmt.Println("---->push pull done")
 	}
-	{ //push timeout
+	{ //conn timeout
 		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 			DebugLog("test server dial to %v success", remote)
 			raw = xio.NewPipedChan()
@@ -161,7 +161,7 @@ func TestCoversocket(t *testing.T) {
 			return
 		}))
 		client.MaxIdle = 0
-		client.TimeoutTicker = 1 * time.Millisecond
+		client.TickerDelay = 1 * time.Millisecond
 		client.KeepIdle = 10 * time.Millisecond
 		//
 		clientConn1, clientRemote1, _ := xio.CreatePipedConn()
@@ -176,7 +176,44 @@ func TestCoversocket(t *testing.T) {
 		client.Close()
 		server.Close()
 		wait.Wait()
-		fmt.Println("---->push timeout done")
+		fmt.Println("---->conn timeout done")
+	}
+	{ //test dialer
+		server := NewServer(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+			DebugLog("test server dial to %v success", remote)
+			raw = xio.NewPipedChan()
+			return
+		}))
+		dialer := NewSortedDialer(DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
+			serverChannel, clientChannel, _ := xio.CreatePipedConn()
+			serverChannel.Alias, clientChannel.Alias = "ServerChannel", "ClientChannel"
+			raw = clientChannel
+			wait.Add(1)
+			go func() {
+				server.ProcConn(serverChannel)
+				wait.Done()
+			}()
+			DebugLog("test client dial to %v success", remote)
+			return
+		}))
+		client := NewClient(256*1024, dialer)
+		client.MaxIdle = 0
+		client.TickerDelay = 1 * time.Millisecond
+		client.KeepIdle = 10 * time.Millisecond
+		//
+		clientConn1, clientRemote1, _ := xio.CreatePipedConn()
+		clientConn1.Alias, clientRemote1.Alias = "ClientConn1", "ClientRemote1"
+		wait.Add(1)
+		go func() {
+			client.PipeConn(clientConn1, "test")
+			wait.Done()
+		}()
+		clientRemote1.Close()
+		time.Sleep(150 * time.Millisecond)
+		client.Close()
+		server.Close()
+		wait.Wait()
+		fmt.Println("---->test dialer done")
 	}
 	{ //http process
 		//

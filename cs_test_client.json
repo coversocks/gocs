@@ -14,6 +14,7 @@
         "tcp://:10923": "tcp://127.0.0.1:11923"
     },
     "proxy_addr": "0.0.0.0:11105",
+    "proxy_skip": null,
     "auto_proxy_addr": "0.0.0.0:11106",
     "manager_addr": "0.0.0.0:11101",
     "mode": "global",

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codingeasygo/util/debug"
 	"github.com/codingeasygo/util/xhttp"
 	"github.com/codingeasygo/util/xio"
 	"github.com/codingeasygo/util/xio/frame"
@@ -55,12 +57,12 @@ func (c *ChannelConn) ReadFrame() (cmd []byte, err error) {
 	switch cmd[offset-1] {
 	case CmdConnBack, CmdConnDial:
 		if len(c.Using) > 0 {
-			err = fmt.Errorf("dial in using")
+			err = fmt.Errorf("dial command in using conn")
 			c.Error = err
 		}
 	case CmdConnData:
 		if len(c.Using) < 1 {
-			err = fmt.Errorf("data in not using")
+			err = fmt.Errorf("data command in not using conn")
 			c.Error = err
 		}
 	case CmdConnClose:
@@ -121,6 +123,30 @@ func (c *ChannelConn) Close() (err error) {
 	if c.Error != nil {
 		err = c.BaseReadWriteCloser.Close()
 	}
+	return
+}
+
+func (c *ChannelConn) Ping() (err error) {
+	_, err = c.WriteCommand(CmdConnDial, []byte("tcp://echo"))
+	if err != nil {
+		return
+	}
+	back, err := c.ReadFrame()
+	if err != nil {
+		return
+	}
+	backMessage := string(back[5:])
+	if backMessage != "ok" {
+		err = fmt.Errorf(backMessage)
+		return
+	}
+	c.Using = "tcp://echo"
+	buf := make([]byte, 8*1024)
+	_, err = c.Write(buf)
+	if err != nil {
+		return
+	}
+	_, err = c.Read(buf)
 	return
 }
 
@@ -192,9 +218,9 @@ func (s *Server) ProcConn(raw io.ReadWriteCloser) (err error) {
 		}
 		conn.WriteCommand(CmdConnBack, []byte("ok"))
 		conn.Using = targetURI
-		DebugLog("Server transfer is started from %v to %v", conn, piper)
+		DebugLog("Server transfer is started by %v from %v to %v", targetURI, conn, piper)
 		piper.PipeConn(conn, targetURI)
-		DebugLog("Server transfer is stopped from %v to %v", conn, piper)
+		DebugLog("Server transfer is stopped by %v from %v to %v", targetURI, conn, piper)
 		conn.Using = ""
 		piper.Close()
 		if conn.Error != nil {
@@ -220,33 +246,35 @@ func (s *Server) Close() (err error) {
 //Client is normal client for implement dark socket protocl
 type Client struct {
 	*xhttp.Client
-	conns         map[string]*ChannelConn
-	idles         map[string]*ChannelConn
-	connsLck      sync.RWMutex
-	BufferSize    int
-	MaxIdle       int
-	KeepIdle      time.Duration
-	TimeoutTicker time.Duration
-	Dialer        Dialer
-	TryMax        int
-	TryDelay      time.Duration
-	exit          chan int
+	conns       map[string]*ChannelConn
+	idles       map[string]*ChannelConn
+	connsLck    sync.RWMutex
+	BufferSize  int
+	MaxIdle     int
+	KeepIdle    time.Duration
+	TestDelay   time.Duration
+	TickerDelay time.Duration
+	Dialer      Dialer
+	TryMax      int
+	TryDelay    time.Duration
+	exit        chan int
 }
 
 //NewClient will create client by buffer size and dialer
 func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 	client = &Client{
-		conns:         map[string]*ChannelConn{},
-		idles:         map[string]*ChannelConn{},
-		connsLck:      sync.RWMutex{},
-		MaxIdle:       100,
-		KeepIdle:      10 * time.Second,
-		TimeoutTicker: time.Second,
-		BufferSize:    bufferSize,
-		Dialer:        dialer,
-		TryMax:        5,
-		TryDelay:      500 * time.Millisecond,
-		exit:          make(chan int, 1),
+		conns:       map[string]*ChannelConn{},
+		idles:       map[string]*ChannelConn{},
+		connsLck:    sync.RWMutex{},
+		MaxIdle:     100,
+		KeepIdle:    10 * time.Second,
+		TestDelay:   30 * time.Second,
+		TickerDelay: time.Second,
+		BufferSize:  bufferSize,
+		Dialer:      dialer,
+		TryMax:      5,
+		TryDelay:    500 * time.Millisecond,
+		exit:        make(chan int, 1),
 	}
 	raw := &http.Client{
 		Transport: &http.Transport{
@@ -254,7 +282,7 @@ func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 		},
 	}
 	client.Client = xhttp.NewClient(raw)
-	go client.timeoutLoop()
+	go client.procLoop()
 	return
 }
 
@@ -281,20 +309,30 @@ func (c *Client) httpDial(network, addr string) (conn net.Conn, err error) {
 	return
 }
 
-func (c *Client) timeoutLoop() {
-	ticker := time.NewTicker(c.TimeoutTicker)
+func (c *Client) procLoop() {
+	ticker := time.NewTicker(c.TickerDelay)
 	running := true
+	testLast := time.Time{}
 	for running {
 		select {
 		case <-c.exit:
 			running = false
 		case <-ticker.C:
 			c.timeoutConn()
+			if time.Since(testLast) > c.TestDelay {
+				c.testDialer()
+				testLast = time.Now()
+			}
 		}
 	}
 }
 
 func (c *Client) timeoutConn() {
+	defer func() {
+		if perr := recover(); perr != nil {
+			ErrorLog("Client timeout conn is panic by %v, the callstack is\n%v", perr, debug.CallStatck())
+		}
+	}()
 	c.connsLck.Lock()
 	for key, conn := range c.idles {
 		if time.Since(conn.LastUsed) > c.KeepIdle {
@@ -304,6 +342,25 @@ func (c *Client) timeoutConn() {
 		}
 	}
 	c.connsLck.Unlock()
+}
+
+func (c *Client) testDialer() {
+	defer func() {
+		if perr := recover(); perr != nil {
+			ErrorLog("Client test conn is panic by %v, the callstack is\n%v", perr, debug.CallStatck())
+		}
+	}()
+	tester, ok := c.Dialer.(Tester)
+	if !ok {
+		return
+	}
+	result := tester.Test("", func(raw io.ReadWriteCloser) (err error) {
+		conn := NewChannelConn(raw, c.BufferSize)
+		err = conn.Ping()
+		return
+	})
+	data, _ := json.MarshalIndent(result, " ", "  ")
+	InfoLog("Client test all dialer is done by \n%v", string(data))
 }
 
 //pullConn will return Conn in idle pool, if pool is empty, dial new by Dialer

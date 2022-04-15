@@ -13,6 +13,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/codingeasygo/util/converter"
 	"github.com/codingeasygo/util/xio"
 	"golang.org/x/net/websocket"
 )
@@ -134,20 +135,30 @@ func TestNetDialer(t *testing.T) {
 }
 
 type TagRWC struct {
-	Tag string
+	Tag   string
+	Panic bool
 }
 
 func (t *TagRWC) Read(p []byte) (l int, err error) {
-	panic("not")
+	if t.Panic {
+		panic("not")
+	}
+	return
 }
 func (t *TagRWC) Write(p []byte) (l int, err error) {
-	panic("not")
+	if t.Panic {
+		panic("not")
+	}
+	return
 }
 func (t *TagRWC) Close() (err error) {
-	panic("not")
+	if t.Panic {
+		panic("not")
+	}
+	return
 }
 
-func TestSortedDialer(t *testing.T) {
+func TestSortedDialerDial(t *testing.T) {
 	willErr := 0
 	dialer := NewSortedDialer(
 		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
@@ -156,7 +167,7 @@ func TestSortedDialer(t *testing.T) {
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
-			raw = &TagRWC{Tag: "1"}
+			raw = &TagRWC{Tag: "1", Panic: true}
 			return
 		}),
 		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
@@ -165,7 +176,7 @@ func TestSortedDialer(t *testing.T) {
 				return
 			}
 			time.Sleep(1 * time.Millisecond)
-			raw = &TagRWC{Tag: "2"}
+			raw = &TagRWC{Tag: "2", Panic: true}
 			return
 		}),
 	)
@@ -248,6 +259,76 @@ func TestSortedDialer(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	fmt.Println(dialer.State())
+}
+
+type sortedTestDialer struct {
+	Avg   Duration
+	Error string
+}
+
+func (s *sortedTestDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
+	return
+}
+
+func (s *sortedTestDialer) Test(remote string, worker func(raw io.ReadWriteCloser) (err error)) (result *TestResult) {
+	result = &TestResult{}
+	result.Avg, result.Error = s.Avg, s.Error
+	return
+}
+
+func TestSortedDialerTest(t *testing.T) {
+	dialer := NewSortedDialer(
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			raw = &TagRWC{Tag: "1", Panic: false}
+			return
+		}),
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			raw = &TagRWC{Tag: "2", Panic: false}
+			return
+		}),
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			raw = &TagRWC{Tag: "3", Panic: false}
+			return
+		}),
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			err = fmt.Errorf("dial error 4")
+			return
+		}),
+		&sortedTestDialer{
+			Avg:   Duration(30 * time.Millisecond),
+			Error: "",
+		},
+		&sortedTestDialer{
+			Avg:   Duration(30 * time.Millisecond),
+			Error: "error",
+		},
+		DialerF(func(r string) (raw io.ReadWriteCloser, err error) {
+			err = fmt.Errorf("dial error 5")
+			return
+		}),
+	)
+	dialer.RateTolerance = 0.05
+	dialer.SortDelay = 1
+	dialer.TestMax = 6
+	result := dialer.Test("", func(raw io.ReadWriteCloser) (err error) {
+		switch raw.(*TagRWC).Tag {
+		case "1":
+			time.Sleep(20 * time.Millisecond)
+		case "2":
+			time.Sleep(10 * time.Millisecond)
+		case "3":
+			err = fmt.Errorf("test error 3")
+		}
+		return
+	})
+	fmt.Println(converter.JSON(result))
+	if res, _ := dialer.Dial(""); res.(*TagRWC).Tag != "2" {
+		t.Error(res)
+		return
+	}
+	for dialer.sorting == 1 {
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestPACDialer(t *testing.T) {

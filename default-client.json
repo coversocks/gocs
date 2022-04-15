@@ -4,7 +4,7 @@
             "enable": true,
             "name": "test1",
             "address": [
-                "wss://127.0.0.1:5200/cover?skip_verify=1"
+                "wss://127.0.0.1:10000-10004/cover?skip_verify=1"
             ],
             "username": "test",
             "password": "123"
@@ -14,7 +14,7 @@
     "proxy_skip": [],
     "auto_proxy_addr": "127.0.0.1:1104",
     "manager_addr": "127.0.0.1:1101",
-    "mode": "auto",
+    "mode": "manual",
     "pprof": 1,
-    "log": 30
+    "log": 40
 }
