@@ -6,7 +6,7 @@ set -xe
 export cpwd=`pwd`
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib
 #### Package ####
-srv_ver=$1
+srv_ver=v1.6.0
 srv_name=coversocks
 build=$cpwd/build
 output=$cpwd/build/$srv_name-$srv_ver
@@ -23,7 +23,7 @@ package gocs
 const Version = "$srv_ver"
 EOF
 echo "Build $srv_name normal executor..."
-go build -o $srv_out/csocks github.com/coversocks/gocs/csocks
+go build -o $srv_out/coversocks github.com/coversocks/gocs/coversocks
 cp -f coversocks-install.sh $srv_out
 cp -f coversocks.service $srv_out
 cp -f default-*.json docker-*.json $srv_out

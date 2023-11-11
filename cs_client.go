@@ -10,8 +10,10 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +34,7 @@ import (
 // var userRulesPath = filepath.Join(execDir(), "user_rules.txt")
 var gfwListURL = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
 
-//ClientServerConf is pojo for dark socks server configure
+// ClientServerConf is pojo for dark socks server configure
 type ClientServerConf struct {
 	Enable   bool     `json:"enable"`
 	Name     string   `json:"name"`
@@ -41,14 +43,14 @@ type ClientServerConf struct {
 	Password string   `json:"password"`
 }
 
-//ClientServerDialer is dialer by ClientServerConf
+// ClientServerDialer is dialer by ClientServerConf
 type ClientServerDialer struct {
 	*ClientServerConf
 	LastUsed int
 	Base     core.Dialer
 }
 
-//Dial imp core.Dialer
+// Dial imp core.Dialer
 func (c *ClientServerDialer) Dial(remote string) (raw io.ReadWriteCloser, err error) {
 	address := c.Address[c.LastUsed]
 	if len(c.Username) > 0 && len(c.Password) > 0 {
@@ -76,7 +78,7 @@ func (c *ClientServerDialer) String() string {
 	return c.Name
 }
 
-//ClientConf is pojo for dark socks client configure
+// ClientConf is pojo for dark socks client configure
 type ClientConf struct {
 	Servers       []*ClientServerConf `json:"servers"`
 	Forwards      map[string]string   `json:"forwards"`
@@ -86,11 +88,40 @@ type ClientConf struct {
 	ManagerAddr   string              `json:"manager_addr"`
 	Mode          string              `json:"mode"`
 	LogLevel      int                 `json:"log"`
+	Prepare       map[string][]string `json:"prepare"`
 	WorkDir       string              `json:"work_dir"`
 	PPROF         int                 `json:"pprof"`
 }
 
-//Client is dialer by ClientConf
+func (c *ClientConf) RunPrepare() (err error) {
+	if len(c.Prepare) < 1 {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		for _, cmd := range c.Prepare[runtime.GOOS] {
+			runner := exec.Command("cmd", "/c", cmd)
+			runner.Stdout = os.Stdout
+			runner.Stderr = os.Stderr
+			err = runner.Run()
+			if err != nil {
+				break
+			}
+		}
+	} else {
+		for _, cmd := range c.Prepare[runtime.GOOS] {
+			runner := exec.Command("bash", "-c", cmd)
+			runner.Stdout = os.Stdout
+			runner.Stderr = os.Stderr
+			err = runner.Run()
+			if err != nil {
+				break
+			}
+		}
+	}
+	return
+}
+
+// Client is dialer by ClientConf
 type Client struct {
 	*core.Client
 	Conf        ClientConf
@@ -106,7 +137,7 @@ type Client struct {
 	ForwardLock sync.RWMutex
 }
 
-//NewClient will return new Client.
+// NewClient will return new Client.
 func NewClient(config string, dialer core.Dialer) (client *Client) {
 	client = &Client{
 		ConfPath:    config,
@@ -117,7 +148,7 @@ func NewClient(config string, dialer core.Dialer) (client *Client) {
 	return
 }
 
-//Boostrap will initial setting
+// Boostrap will initial setting
 func (c *Client) Boostrap(base core.Dialer) (err error) {
 	var dialers = []core.Dialer{}
 	for _, conf := range c.Conf.Servers {
@@ -153,7 +184,7 @@ func (c *Client) Boostrap(base core.Dialer) (err error) {
 	return
 }
 
-//ReadGfwRules will read the gfwlist.txt and append user_rules
+// ReadGfwRules will read the gfwlist.txt and append user_rules
 func (c *Client) ReadGfwRules() (rules []string, err error) {
 	gfwFile := filepath.Join(c.WorkDir, "gfwlist.txt")
 	userFile := filepath.Join(c.WorkDir, "user_rules.txt")
@@ -167,7 +198,7 @@ func (c *Client) ReadGfwRules() (rules []string, err error) {
 	return
 }
 
-//UpdateGfwlist will update the gfwlist.txt
+// UpdateGfwlist will update the gfwlist.txt
 func (c *Client) UpdateGfwlist() (err error) {
 	if c.Client == nil {
 		err = fmt.Errorf("proxy server is not started")
@@ -183,7 +214,7 @@ func (c *Client) UpdateGfwlist() (err error) {
 	return
 }
 
-//PACH is http handler to get pac js
+// PACH is http handler to get pac js
 func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", "application/x-javascript")
 	//
@@ -227,7 +258,7 @@ func (c *Client) PACH(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte(abpStr))
 }
 
-//ChangeProxyModeH is http handler to change proxy mode
+// ChangeProxyModeH is http handler to change proxy mode
 func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
 	_, err := c.ChangeProxyMode(mode)
@@ -247,7 +278,7 @@ func (c *Client) ChangeProxyModeH(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%v", "ok")
 }
 
-//UpdateGfwlistH is http handler to update gfwlist.txt
+// UpdateGfwlistH is http handler to update gfwlist.txt
 func (c *Client) UpdateGfwlistH(w http.ResponseWriter, r *http.Request) {
 	err := c.UpdateGfwlist()
 	if err != nil {
@@ -301,7 +332,7 @@ func (c *Client) procForward(conn net.Conn, remote string) (err error) {
 	return
 }
 
-//StateH is http handler to show client state
+// StateH is http handler to show client state
 func (c *Client) StateH(w http.ResponseWriter, r *http.Request) {
 	res := map[string]interface{}{}
 	if d, ok := c.Client.Dialer.(core.Statable); ok {
@@ -316,7 +347,7 @@ func (c *Client) String() string {
 	return "CoverSocksClient"
 }
 
-//Start by configure and dialer
+// Start by configure and dialer
 func (c *Client) Start() (err error) {
 	conf := ClientConf{Mode: "auto"}
 	err = core.ReadJSON(c.ConfPath, &conf)
@@ -340,6 +371,10 @@ func (c *Client) Start() (err error) {
 	} else {
 		workDir, err = filepath.Abs(".")
 	}
+	if err != nil {
+		return
+	}
+	err = conf.RunPrepare()
 	if err != nil {
 		return
 	}
@@ -429,7 +464,7 @@ func (c *Client) Start() (err error) {
 	return
 }
 
-//Wait will wait all runner
+// Wait will wait all runner
 func (c *Client) Wait() {
 	if c.Server != nil {
 		c.Server.Wait()
@@ -439,7 +474,7 @@ func (c *Client) Wait() {
 	}
 }
 
-//Stop will stop running client
+// Stop will stop running client
 func (c *Client) Stop() {
 	InfoLog("Client stopping client listener")
 	if c.AutoDialer != nil {
@@ -475,7 +510,7 @@ func parseConnAddr(addr string) (addrs []string, err error) {
 	return parsePortAddr(addrParts[0]+":", addrPorts, "/"+addrParts[1])
 }
 
-//ChangeProxyMode will change system proxy mode
+// ChangeProxyMode will change system proxy mode
 func (c *Client) ChangeProxyMode(mode string) (message string, err error) {
 	if c.Server == nil || c.Manager == nil {
 		err = fmt.Errorf("proxy server is not started")
@@ -505,20 +540,20 @@ func (c *Client) ChangeProxyMode(mode string) (message string, err error) {
 
 var clientInstance *Client
 
-//StartClient will start client by configure
+// StartClient will start client by configure
 func StartClient(c string) (err error) {
 	clientInstance = NewClient(c, core.NewWebsocketDialer())
 	return clientInstance.Start()
 }
 
-//WaitClient will wait all runner
+// WaitClient will wait all runner
 func WaitClient() {
 	if clientInstance != nil {
 		clientInstance.Wait()
 	}
 }
 
-//StopClient will stop running client
+// StopClient will stop running client
 func StopClient() {
 	if clientInstance != nil {
 		clientInstance.Stop()

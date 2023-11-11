@@ -38,7 +38,7 @@ func TestJSONFileAuth(t *testing.T) {
 	mux.HandleFunc("/removeUser", auth.RemoveUser)
 	mux.HandleFunc("/listUser", auth.ListUser)
 	mux.HandleFunc("/testUser", func(res http.ResponseWriter, req *http.Request) {
-		ok, err := auth.BasicAuth(req)
+		_, ok, err := auth.BasicAuth(req)
 		if !ok || err != nil {
 			fmt.Fprintf(res, "error")
 		} else {

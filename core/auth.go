@@ -9,7 +9,7 @@ import (
 	"github.com/codingeasygo/util/xhash"
 )
 
-//JSONFileAuth is the basic auth impl
+// JSONFileAuth is the basic auth impl
 type JSONFileAuth struct {
 	FileName   string
 	AdminUser  map[string]string
@@ -17,7 +17,7 @@ type JSONFileAuth struct {
 	userLck    sync.RWMutex
 }
 
-//NewJSONFileAuth return new JSONFileAuth, it will read the users from json file
+// NewJSONFileAuth return new JSONFileAuth, it will read the users from json file
 func NewJSONFileAuth(adimUser map[string]string, filename string) (auth *JSONFileAuth) {
 	auth = &JSONFileAuth{
 		FileName:   filename,
@@ -58,8 +58,8 @@ func (j *JSONFileAuth) removeUser(username string) (err error) {
 	return
 }
 
-//BasicAuth will auth by http basic auth
-func (j *JSONFileAuth) BasicAuth(req *http.Request) (ok bool, err error) {
+// BasicAuth will auth by http basic auth
+func (j *JSONFileAuth) BasicAuth(req *http.Request) (username string, ok bool, err error) {
 	username, userPass, ok := req.BasicAuth()
 	if ok {
 		j.userLck.RLock()
@@ -92,7 +92,7 @@ func (j *JSONFileAuth) adminBasicAuth(res http.ResponseWriter, req *http.Request
 	return
 }
 
-//AddUser will add user to json file
+// AddUser will add user to json file
 func (j *JSONFileAuth) AddUser(res http.ResponseWriter, req *http.Request) {
 	if !j.adminBasicAuth(res, req) {
 		return
@@ -113,7 +113,7 @@ func (j *JSONFileAuth) AddUser(res http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(res, "%v", "ok")
 }
 
-//RemoveUser will remove user to json file
+// RemoveUser will remove user to json file
 func (j *JSONFileAuth) RemoveUser(res http.ResponseWriter, req *http.Request) {
 	if !j.adminBasicAuth(res, req) {
 		return
@@ -134,7 +134,7 @@ func (j *JSONFileAuth) RemoveUser(res http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(res, "%v", "ok")
 }
 
-//ListUser will list user as html page
+// ListUser will list user as html page
 func (j *JSONFileAuth) ListUser(res http.ResponseWriter, req *http.Request) {
 	if !j.adminBasicAuth(res, req) {
 		return

@@ -1,17 +1,19 @@
 @echo off
 set srv_name=coversocks
-set srv_ver=1.4.0
+set srv_ver=v1.6.0
 set OS=%1
 del /s /a /q build\%srv_name%
 mkdir build
 mkdir build\%srv_name%
 set GOOS=windows
 set GOARCH=%1
-go build -o build\%srv_name%\csocks.exe github.com/coversocks/gocs/csocks
+go build -o build\%srv_name%\coversocks.exe github.com/coversocks/gocs/coversocks
 if NOT %ERRORLEVEL% EQU 0 goto :efail
+xcopy coversocks.bat build\%srv_name%
 xcopy win-%OS%\nssm.exe build\%srv_name%
 xcopy cert.bat build\%srv_name%
 xcopy coversocks-conf.bat build\%srv_name%
+xcopy coversocks-restart.bat build\%srv_name%
 xcopy coversocks-install-server.bat build\%srv_name%
 xcopy coversocks-install-client.bat build\%srv_name%
 xcopy coversocks-uninstall.bat build\%srv_name%

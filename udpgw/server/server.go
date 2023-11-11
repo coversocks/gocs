@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 
@@ -23,11 +22,11 @@ func main() {
 			gw := udpgw.NewUDPGW()
 			gw.DNS = dns
 			udpgw := frame.NewBasePiper(gw, bufferSize)
-			udpgw.ByteOrder = binary.LittleEndian
-			udpgw.LengthFieldMagic = 0
-			udpgw.LengthFieldLength = 2
-			udpgw.LengthAdjustment = -2
-			udpgw.DataOffset = 2
+			// udpgw.ByteOrder = binary.LittleEndian
+			// udpgw.LengthFieldMagic = 0
+			// udpgw.LengthFieldLength = 2
+			// udpgw.LengthAdjustment = -2
+			// udpgw.DataOffset = 2
 			raw = xio.NewPrintPiper("UDPGW", udpgw)
 		} else {
 			raw, err = xio.DialNetPiper(uri, bufferSize)

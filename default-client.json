@@ -10,6 +10,17 @@
             "password": "123"
         }
     ],
+    "forwards": {
+        "tcp://:1194": "tcp://127.0.0.1:1194"
+    },
+    "prepare": {
+        "windows": [
+            "route add x.x.x.x mask 255.255.255.255 192.168.1.1"
+        ],
+        "darwin": [
+            "route -n add x.x.x.x/32 192.168.1.1"
+        ]
+    },
     "proxy_addr": "127.0.0.1:1105",
     "proxy_skip": [],
     "auto_proxy_addr": "127.0.0.1:1104",

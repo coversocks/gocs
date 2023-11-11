@@ -43,7 +43,7 @@ func TestCoversocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(serverChannel)
+			server.ProcConn(serverChannel, "")
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -97,7 +97,7 @@ func TestCoversocket(t *testing.T) {
 			raw = clientChannel
 			wait.Add(1)
 			go func() {
-				server.ProcConn(serverChannel)
+				server.ProcConn(serverChannel, "")
 				wait.Done()
 			}()
 			DebugLog("test client dial to %v success", remote)
@@ -154,7 +154,7 @@ func TestCoversocket(t *testing.T) {
 			raw = clientChannel
 			wait.Add(1)
 			go func() {
-				server.ProcConn(serverChannel)
+				server.ProcConn(serverChannel, "")
 				wait.Done()
 			}()
 			DebugLog("test client dial to %v success", remote)
@@ -190,7 +190,7 @@ func TestCoversocket(t *testing.T) {
 			raw = clientChannel
 			wait.Add(1)
 			go func() {
-				server.ProcConn(serverChannel)
+				server.ProcConn(serverChannel, "")
 				wait.Done()
 			}()
 			DebugLog("test client dial to %v success", remote)
@@ -233,7 +233,7 @@ func TestCoversocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(serverChannel)
+			server.ProcConn(serverChannel, "")
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -276,7 +276,7 @@ func TestCoversocket(t *testing.T) {
 		}))
 		wait.Add(1)
 		go func() {
-			server.ProcConn(serverChannel)
+			server.ProcConn(serverChannel, "")
 			wait.Done()
 		}()
 		client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
@@ -342,7 +342,7 @@ func TestCoversocket(t *testing.T) {
 		buf1[4] = 0
 		copy(buf1[5:], []byte("abc"))
 		procConn1.ReadData <- buf1
-		err = server.ProcConn(procConn1)
+		err = server.ProcConn(procConn1, "")
 		if err == nil {
 			t.Error(err)
 			return
@@ -354,7 +354,7 @@ func TestCoversocket(t *testing.T) {
 		buf2[4] = CmdConnBack
 		copy(buf2[5:], []byte("abc"))
 		procConn2.ReadData <- buf2
-		err = server.ProcConn(procConn2)
+		err = server.ProcConn(procConn2, "")
 		if err == nil {
 			t.Error(err)
 			return
@@ -552,7 +552,7 @@ func BenchmarkCoversocksConn(b *testing.B) {
 	client := NewClient(256*1024, DialerF(func(remote string) (raw io.ReadWriteCloser, err error) {
 		serverChannel, raw, err := xio.CreatePipedConn()
 		if err == nil {
-			go server.ProcConn(serverChannel)
+			go server.ProcConn(serverChannel, "")
 		}
 		return
 	}))

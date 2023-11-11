@@ -96,14 +96,14 @@ curl https://www.google.com
 * for osx and linux
 ```.sh
 #get source code
-go get github.com/coversocks/gocs/csocks
+go get github.com/coversocks/gocs/coversocks
 #package binary
 cd $GOPATH/src/github.com/coversocks/gocs
 ./pkg.sh
 ```
 * for windows
 ```.bat
-go get github.com/coversocks/gocs/csocks
+go get github.com/coversocks/gocs/coversocks
 cd $GOPATH\src\github.com\coversocks\gocs
 pkg 386
 pkg amd64

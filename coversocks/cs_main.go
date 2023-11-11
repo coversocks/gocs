@@ -17,18 +17,17 @@ import (
 )
 
 var version = gocs.Version
-var argConf string
+var argConf string = "default-client.json"
 var argRunServer bool
-var argRunClient bool
+var argRunClient bool = true
 var argRunVersion bool
 
 func init() {
-	flag.StringVar(&argConf, "f", "/etc/coversocks/coversocks.json", "the cover socket configure file")
+	flag.StringVar(&argConf, "f", "default-client.json", "the cover socket configure file")
 	flag.BoolVar(&argRunServer, "s", false, "start cover socket server")
-	flag.BoolVar(&argRunClient, "c", false, "start cover socket client")
+	flag.BoolVar(&argRunClient, "c", true, "start cover socket client")
 	flag.BoolVar(&argRunVersion, "v", false, "show version, current is "+version)
 	http.HandleFunc("/debug/udpgw", udpgw.StateH)
-	go http.ListenAndServe(":6060", nil)
 }
 
 func main() {
@@ -38,6 +37,7 @@ func main() {
 	if argRunVersion {
 		fmt.Printf("%v\n", version)
 	} else if argRunServer {
+		// go http.ListenAndServe(":6061", nil)
 		log.Printf("boostrap coversock %v as server", version)
 		err := gocs.StartServer(argConf)
 		if err != nil {
@@ -48,6 +48,7 @@ func main() {
 		gocs.WaitServer()
 		time.Sleep(300 * time.Millisecond)
 	} else if argRunClient {
+		// go http.ListenAndServe(":6062", nil)
 		log.Printf("boostrap coversock %v as client", version)
 		err := gocs.StartClient(argConf)
 		if err != nil {

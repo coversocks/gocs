@@ -20,7 +20,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-//ServerConf is pojo for server configure
+// ServerConf is pojo for server configure
 type ServerConf struct {
 	HTTPAddr  string            `json:"http_addr"`
 	HTTPSAddr string            `json:"https_addr"`
@@ -56,7 +56,7 @@ func (h *httpServer) ListenAndServeTLS() (err error) {
 	return
 }
 
-//Server is coversocks Sever implement
+// Server is coversocks Sever implement
 type Server struct {
 	ConfPath    string
 	Conf        ServerConf
@@ -70,7 +70,7 @@ type Server struct {
 	auth        *core.JSONFileAuth
 }
 
-//NewServer will return new Server
+// NewServer will return new Server
 func NewServer(confPath string, conf ServerConf, dialer xio.PiperDialer) (server *Server) {
 	server = &Server{
 		ConfPath:    confPath,
@@ -84,12 +84,12 @@ func NewServer(confPath string, conf ServerConf, dialer xio.PiperDialer) (server
 	return
 }
 
-//ServeHTTP is http.Handler implement
+// ServeHTTP is http.Handler implement
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-//Dial will dial remote by Dialer
+// Dial will dial remote by Dialer
 func (s *Server) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error) {
 	if uri == "tcp://udpgw" {
 		udpgw := udpgw.NewUDPGW()
@@ -104,9 +104,10 @@ func (s *Server) DialPiper(uri string, bufferSize int) (raw xio.Piper, err error
 }
 
 func (s *Server) wsHandler(ws *websocket.Conn) {
-	ok, err := s.auth.BasicAuth(ws.Request())
+	username, ok, err := s.auth.BasicAuth(ws.Request())
 	if ok && err == nil {
-		s.Server.ProcConn(ws)
+		key := fmt.Sprintf("%v/%v/%p", username, ws.RemoteAddr(), ws)
+		s.Server.ProcConn(ws, key)
 	} else {
 		core.WarnLog("Server receive auth fail connection from %v", ws.RemoteAddr())
 	}
@@ -138,7 +139,7 @@ func (s *Server) httpsStart() (err error) {
 	s.waiter.Add(len(addrs))
 	for _, addr := range addrs {
 		var cert tls.Certificate
-		cert, _, _, _ = xcrypto.GenerateWeb(nil, nil, false, "", "", s.Conf.HTTPSLen)
+		cert, _, _, _ = xcrypto.GenerateWeb(nil, nil, false, "", "", "", s.Conf.HTTPSLen)
 		go s.runServer(addr, &cert)
 	}
 	InfoLog("Server https server on %v is started", s.Conf.HTTPSAddr)
@@ -170,7 +171,7 @@ func (s *Server) runServer(addr string, cert *tls.Certificate) (err error) {
 	return
 }
 
-//ProcRestart will process restart https server by timeout
+// ProcRestart will process restart https server by timeout
 func (s *Server) ProcRestart() (err error) {
 	timeout := time.Duration(s.Conf.HTTPSGen) * time.Millisecond
 	if timeout < 1 {
@@ -191,7 +192,7 @@ func (s *Server) ProcRestart() (err error) {
 		return
 	}
 	InfoLog("Server https server on %v is restarting", addr)
-	cert, _, _, _ := xcrypto.GenerateWeb(nil, nil, false, "", "", s.Conf.HTTPSLen)
+	cert, _, _, _ := xcrypto.GenerateWeb(nil, nil, false, "", "", "", s.Conf.HTTPSLen)
 	if err == nil {
 		server.Server.Close()
 		time.Sleep(100 * time.Millisecond)
@@ -201,7 +202,7 @@ func (s *Server) ProcRestart() (err error) {
 	return
 }
 
-//Start by configure path and raw dialer
+// Start by configure path and raw dialer
 func (s *Server) Start() (err error) {
 	serverConfDir := filepath.Dir(s.ConfPath)
 	InfoLog("Server using config from %v, work on %v, log level %v", s.ConfPath, serverConfDir, s.Conf.LogLevel)
@@ -235,12 +236,12 @@ func (s *Server) Start() (err error) {
 	return
 }
 
-//Wait will wait all runner is stopped
+// Wait will wait all runner is stopped
 func (s *Server) Wait() {
 	s.waiter.Wait()
 }
 
-//Stop will stop running server
+// Stop will stop running server
 func (s *Server) Stop() {
 	InfoLog("Server stopping client listener")
 	s.serversLock.Lock()
@@ -262,7 +263,7 @@ func parseListenAddr(addr string) (addrs []string, err error) {
 
 var server *Server
 
-//StartServer by configure path
+// StartServer by configure path
 func StartServer(c string) (err error) {
 	conf := ServerConf{}
 	err = core.ReadJSON(c, &conf)
@@ -278,14 +279,14 @@ func StartServer(c string) (err error) {
 	return
 }
 
-//WaitServer will wait server
+// WaitServer will wait server
 func WaitServer() {
 	if server != nil {
 		server.Wait()
 	}
 }
 
-//StopServer will stop server
+// StopServer will stop server
 func StopServer() {
 	if server != nil {
 		server.Stop()

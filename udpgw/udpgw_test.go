@@ -64,9 +64,9 @@ func TestUDPGW(t *testing.T) {
 	a, b, _ := xio.Pipe()
 	gw := NewUDPGW()
 	gw.DNS = addrv4
-	go gw.PipeConn(frame.NewReadWriteCloser(b, 1024), "tcp://localhost")
+	go gw.PipeConn(frame.NewReadWriteCloser(frame.NewDefaultHeader(), b, 1024), "tcp://localhost")
 	//
-	sender := frame.NewReadWriteCloser(a, 1024)
+	sender := frame.NewReadWriteCloser(frame.NewDefaultHeader(), a, 1024)
 	var back []byte
 
 	//ipv4

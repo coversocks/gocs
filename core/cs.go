@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -9,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codingeasygo/util/debug"
+	"github.com/codingeasygo/util/xdebug"
 	"github.com/codingeasygo/util/xhttp"
 	"github.com/codingeasygo/util/xio"
 	"github.com/codingeasygo/util/xio/frame"
@@ -20,22 +19,22 @@ const (
 	DefaultBufferSize = 64 * 1024
 )
 
-//ChannelConn is cs connection
+// ChannelConn is cs connection
 type ChannelConn struct {
 	*frame.BaseReadWriteCloser
-	Key        string
-	LastUsed   time.Time
-	Error      error
-	BufferSize int
-	Using      string
+	Key         string
+	LastUsed    time.Time
+	Error       error
+	BufferSize_ int
+	Using       string
 }
 
-//NewChannelConn will return new channel
+// NewChannelConn will return new channel
 func NewChannelConn(raw io.ReadWriteCloser, bufferSize int) (conn *ChannelConn) {
 	conn = &ChannelConn{
-		BaseReadWriteCloser: frame.NewReadWriteCloser(raw, bufferSize),
+		BaseReadWriteCloser: frame.NewReadWriteCloser(frame.NewDefaultHeader(), raw, bufferSize),
 		LastUsed:            time.Now(),
-		BufferSize:          bufferSize,
+		BufferSize_:         bufferSize,
 	}
 	conn.Key = fmt.Sprintf("%p", conn)
 	conn.SetLengthAdjustment(0)
@@ -45,6 +44,10 @@ func NewChannelConn(raw io.ReadWriteCloser, bufferSize int) (conn *ChannelConn) 
 	conn.SetDataOffset(5)
 	conn.SetTimeout(0)
 	return
+}
+
+func (c *ChannelConn) BufferSize() int {
+	return c.BufferSize_
 }
 
 func (c *ChannelConn) ReadFrame() (cmd []byte, err error) {
@@ -102,7 +105,7 @@ func (c *ChannelConn) WriteTo(writer io.Writer) (w int64, err error) {
 }
 
 func (c *ChannelConn) ReadFrom(reader io.Reader) (w int64, err error) {
-	w, err = frame.ReadFrom(c, reader, c.BufferSize)
+	w, err = frame.ReadFrom(c, reader, c.BufferSize_)
 	return
 }
 
@@ -150,6 +153,30 @@ func (c *ChannelConn) Ping() (err error) {
 	return
 }
 
+func (c *ChannelConn) LocalAddr() net.Addr {
+	return c
+}
+
+func (c *ChannelConn) RemoteAddr() net.Addr {
+	return c
+}
+
+func (c *ChannelConn) Network() string {
+	return "cs"
+}
+
+func (c *ChannelConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *ChannelConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *ChannelConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
 func (c *ChannelConn) String() string {
 	return fmt.Sprintf("%v", c.BaseReadWriteCloser)
 }
@@ -165,7 +192,7 @@ const (
 	CmdConnClose = 0x40
 )
 
-//Server is the main implementation for dark socks
+// Server is the main implementation for dark socks
 type Server struct {
 	BufferSize int
 	Dialer     xio.PiperDialer
@@ -173,7 +200,7 @@ type Server struct {
 	connsLck   sync.RWMutex
 }
 
-//NewServer will create Server by buffer size and dialer
+// NewServer will create Server by buffer size and dialer
 func NewServer(bufferSize int, dialer xio.PiperDialer) (server *Server) {
 	server = &Server{
 		BufferSize: bufferSize,
@@ -184,8 +211,8 @@ func NewServer(bufferSize int, dialer xio.PiperDialer) (server *Server) {
 	return
 }
 
-//ProcConn will start process proxy connection
-func (s *Server) ProcConn(raw io.ReadWriteCloser) (err error) {
+// ProcConn will start process proxy connection
+func (s *Server) ProcConn(raw io.ReadWriteCloser, key string) (err error) {
 	conn := NewChannelConn(raw, s.BufferSize)
 	s.connsLck.Lock()
 	s.conns[conn.Key] = conn
@@ -233,7 +260,7 @@ func (s *Server) ProcConn(raw io.ReadWriteCloser) (err error) {
 	return
 }
 
-//Close will cose all connection
+// Close will cose all connection
 func (s *Server) Close() (err error) {
 	s.connsLck.Lock()
 	for _, conn := range s.conns {
@@ -243,7 +270,7 @@ func (s *Server) Close() (err error) {
 	return
 }
 
-//Client is normal client for implement dark socket protocl
+// Client is normal client for implement dark socket protocl
 type Client struct {
 	*xhttp.Client
 	conns       map[string]*ChannelConn
@@ -257,10 +284,12 @@ type Client struct {
 	Dialer      Dialer
 	TryMax      int
 	TryDelay    time.Duration
+	connAccept  chan net.Conn
+	running     bool
 	exit        chan int
 }
 
-//NewClient will create client by buffer size and dialer
+// NewClient will create client by buffer size and dialer
 func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 	client = &Client{
 		conns:       map[string]*ChannelConn{},
@@ -274,6 +303,7 @@ func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 		Dialer:      dialer,
 		TryMax:      5,
 		TryDelay:    500 * time.Millisecond,
+		connAccept:  make(chan net.Conn, 8),
 		exit:        make(chan int, 1),
 	}
 	raw := &http.Client{
@@ -282,12 +312,14 @@ func NewClient(bufferSize int, dialer Dialer) (client *Client) {
 		},
 	}
 	client.Client = xhttp.NewClient(raw)
+	client.running = true
 	go client.procLoop()
 	return
 }
 
-//Close will close all proc connection
+// Close will close all proc connection
 func (c *Client) Close() (err error) {
+	c.running = false
 	conns := []frame.ReadWriteCloser{}
 	c.connsLck.Lock()
 	for _, conn := range c.conns {
@@ -330,7 +362,7 @@ func (c *Client) procLoop() {
 func (c *Client) timeoutConn() {
 	defer func() {
 		if perr := recover(); perr != nil {
-			ErrorLog("Client timeout conn is panic by %v, the callstack is\n%v", perr, debug.CallStatck())
+			ErrorLog("Client timeout conn is panic by %v, the callstack is\n%v", perr, xdebug.CallStack())
 		}
 	}()
 	c.connsLck.Lock()
@@ -347,23 +379,23 @@ func (c *Client) timeoutConn() {
 func (c *Client) testDialer() {
 	defer func() {
 		if perr := recover(); perr != nil {
-			ErrorLog("Client test conn is panic by %v, the callstack is\n%v", perr, debug.CallStatck())
+			ErrorLog("Client test conn is panic by %v, the callstack is\n%v", perr, xdebug.CallStack())
 		}
 	}()
 	tester, ok := c.Dialer.(Tester)
 	if !ok {
 		return
 	}
-	result := tester.Test("", func(raw io.ReadWriteCloser) (err error) {
+	tester.Test("", func(raw io.ReadWriteCloser) (err error) {
 		conn := NewChannelConn(raw, c.BufferSize)
 		err = conn.Ping()
 		return
 	})
-	data, _ := json.MarshalIndent(result, " ", "  ")
-	InfoLog("Client test all dialer is done by \n%v", string(data))
+	// data, _ := json.MarshalIndent(result, " ", "  ")
+	// InfoLog("Client test all dialer is done by \n%v", string(data))
 }
 
-//pullConn will return Conn in idle pool, if pool is empty, dial new by Dialer
+// pullConn will return Conn in idle pool, if pool is empty, dial new by Dialer
 func (c *Client) pullConn() (conn *ChannelConn, err error) {
 	var key string
 	c.connsLck.Lock()
@@ -387,9 +419,13 @@ func (c *Client) pullConn() (conn *ChannelConn, err error) {
 	return
 }
 
-//pushConn will push one Conn to idle pool
+// pushConn will push one Conn to idle pool
 func (c *Client) pushConn(conn *ChannelConn) {
+	if conn == nil {
+		panic("conn is nil")
+	}
 	c.connsLck.Lock()
+	defer c.connsLck.Unlock()
 	if len(c.idles) >= c.MaxIdle {
 		var oldestTime = time.Now()
 		var oldest *ChannelConn
@@ -407,11 +443,10 @@ func (c *Client) pushConn(conn *ChannelConn) {
 	}
 	delete(c.conns, conn.Key)
 	c.idles[conn.Key] = conn
-	c.connsLck.Unlock()
 	DebugLog("Client push one channel to idle pool")
 }
 
-//PipeConn will start process proxy connection
+// PipeConn will start process proxy connection
 func (c *Client) PipeConn(raw io.ReadWriteCloser, target string) (err error) {
 	defer raw.Close()
 	piper, err := c.DialPiper(target, c.BufferSize)
@@ -422,9 +457,7 @@ func (c *Client) PipeConn(raw io.ReadWriteCloser, target string) (err error) {
 	return
 }
 
-//DialPiper is xio.PiperDialer implement for create xio.Piper on client
-func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err error) {
-	var conn *ChannelConn
+func (c *Client) DialBack(target string, bufferSize int) (conn *ChannelConn, message string, err error) {
 	var back []byte
 	for i := 0; i < c.TryMax; i++ {
 		if i > 0 {
@@ -453,11 +486,24 @@ func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err 
 	if err != nil {
 		return
 	}
-	backMessage := string(back[5:])
-	if backMessage != "ok" {
+	message = string(back[5:])
+	return
+}
+
+func (c *Client) DialConn(target string, bufferSize int) (conn *ChannelConn, err error) {
+	conn, backMessage, err := c.DialBack(target, bufferSize)
+	if err == nil && backMessage != "ok" {
 		err = fmt.Errorf("%v", backMessage)
 		c.pushConn(conn)
 		InfoLog("Client try dial to %v fail with %v", target, err)
+	}
+	return
+}
+
+// DialPiper is xio.PiperDialer implement for create xio.Piper on client
+func (c *Client) DialPiper(target string, bufferSize int) (piper xio.Piper, err error) {
+	conn, err := c.DialConn(target, bufferSize)
+	if err != nil {
 		return
 	}
 	conn.Using = target

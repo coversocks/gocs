@@ -6,7 +6,7 @@ After=network.target
 User=cs
 Restart=always
 WorkingDirectory=/home/cs/
-ExecStart=/home/cs/coversocks/csocks -s -f /home/cs/conf/coversocks.json
+ExecStart=/home/cs/coversocks/coversocks -s -f /home/cs/conf/coversocks.json
 # EnvironmentFile=/etc/coversocks/coversocks.env
 
 [Install]
