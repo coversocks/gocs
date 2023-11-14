@@ -6,7 +6,7 @@ set -xe
 export cpwd=`pwd`
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib
 #### Package ####
-srv_ver=v1.6.1
+srv_ver=v1.6.0
 srv_name=coversocks
 build=$cpwd/build
 output=$cpwd/build/$srv_name-$srv_ver
